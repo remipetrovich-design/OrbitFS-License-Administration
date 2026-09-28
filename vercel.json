@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- app components lib public scripts package.json package-lock.json next.config.* tsconfig.json vercel.json",
+  "git": {
+    "deploymentEnabled": false
+  }
+}
