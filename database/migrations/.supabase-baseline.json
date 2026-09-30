@@ -1,0 +1,130 @@
+{
+  "format": "orbitfs-supabase-baseline-v1",
+  "project_ref": "hwlrgogwnbjceevweqvv",
+  "authority": "Custom License Manager",
+  "legacy_source": "database/migrations",
+  "created_at": "2026-09-25",
+  "files": {
+    "database/migrations/20260917_license_authority_products.sql": "ddd9ff335af16dd871c234d76d02db54db6bf0cc",
+    "database/migrations/20260917_license_controls.sql": "62497dd27cf697209c155b9be2d34ed94abd4fa4",
+    "database/migrations/20260919_release_channels.sql": "62a4433d058fc0c1c726e3188f107d57cfe34837",
+    "database/migrations/20260919_release_immutability.sql": "d15e523813e66b9591e73982b6c2c1f57706dfec",
+    "database/migrations/20260920_enforce_one_current_license_per_customer_product.sql": "91a41c05cf1b3ca5156bb9fecc0d065622e5142d",
+    "database/migrations/20260920_release_channel_access_mode.sql": "1b4ce9634115f97e96174433af757b1334271058",
+    "database/migrations/20260924_authority_schema_rebuild.sql": "1a4303307af3161bf0fd726334a3d73f74f14214",
+    "database/migrations/20260924_release_channel_access.sql": "5dcd5dea6beec91f883d7e38016e20b0303d830e",
+    "database/migrations/20260924_runtime_policy_and_pulse.sql": "3af165b56e3409445c3f43867ad1bd6f6a4c0956",
+    "database/migrations/20260925_deployment_capability_authority.sql": "b1d366bc55c8c6e1519ad33d81a2b1c047cf1008",
+    "database/migrations/20260925_fix_release_channel_trigger_search_path.sql": "06fa91818f227019cff5f53938cf71891d737557",
+    "database/migrations/20260925_repair_release_channel_access_mode.sql": "315d25b96d357e5240b2efa40f35975a6bbb857a",
+    "database/migrations/20260928020000_release_lifecycle_states.sql": "03f849c9917ab41af3773e0b00d0e533192fe0c4",
+    "database/migrations/20260928_allow_admin_multiple_customer_licenses.sql": "2992a40554777f1d42796c13b91199424bf7475e",
+    "database/migrations/20260929_official_api_connections.sql": "cf5f854ae44bc028c34ff6028127f278012a39df"
+  },
+  "remote_migrations": [
+    {
+      "version": "20260916153921",
+      "name": "align_license_manager_runtime_schema"
+    },
+    {
+      "version": "20260916154128",
+      "name": "revert_unneeded_billing_store_schema_changes"
+    },
+    {
+      "version": "20260916155141",
+      "name": "sync_release_workflow_columns"
+    },
+    {
+      "version": "20260916195851",
+      "name": "bound_runtime_statement_and_lock_timeouts"
+    },
+    {
+      "version": "20260916200125",
+      "name": "enforce_runtime_statement_and_connection_limits"
+    },
+    {
+      "version": "20260917022935",
+      "name": "add_license_customer_override"
+    },
+    {
+      "version": "20260917022959",
+      "name": "license_controls_runtime_alignment"
+    },
+    {
+      "version": "20260918082522",
+      "name": "sync_license_manager_release_schema_20260918"
+    },
+    {
+      "version": "20260918155713",
+      "name": "release_immutability_20260919"
+    },
+    {
+      "version": "20260919070028",
+      "name": "release_channels_20260919"
+    },
+    {
+      "version": "20260919175418",
+      "name": "release_channel_access_policy_20260920"
+    },
+    {
+      "version": "20260919215912",
+      "name": "installation_telemetry_and_deployment_registry"
+    },
+    {
+      "version": "20260919215940",
+      "name": "allow_installation_checkin_events"
+    },
+    {
+      "version": "20260919220130",
+      "name": "index_deployment_events_activation"
+    },
+    {
+      "version": "20260920045148",
+      "name": "enforce_one_current_license_per_customer_product"
+    },
+    {
+      "version": "20260922103522",
+      "name": "release_immutability_withdrawal"
+    },
+    {
+      "version": "20260922133914",
+      "name": "harden_license_manager_function_security"
+    },
+    {
+      "version": "20260922135052",
+      "name": "index_license_manager_foreign_keys"
+    },
+    {
+      "version": "20260924190017",
+      "name": "deployment_capability_authority_20260925"
+    },
+    {
+      "version": "20260924213907",
+      "name": "panel_release_events_20260924"
+    },
+    {
+      "version": "20260924213912",
+      "name": "release_draft_attempts_20260925"
+    },
+    {
+      "version": "20260925000752",
+      "name": "repair_release_channel_access_mode_20260925"
+    },
+    {
+      "version": "20260927100944",
+      "name": "fix_release_channel_trigger_search_path_20260927"
+    },
+    {
+      "version": "20260927223006",
+      "name": "release_lifecycle_states"
+    },
+    {
+      "version": "20260927223045",
+      "name": "20260928020000_release_lifecycle_states"
+    },
+    {
+      "version": "20260928121932",
+      "name": "allow_admin_multiple_customer_licenses"
+    }
+  ]
+}

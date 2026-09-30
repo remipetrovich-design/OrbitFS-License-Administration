@@ -1,3 +1,4 @@
+-- License Manager owns OrbitFS release-channel definitions.
 create table if not exists public.release_channels (
   id uuid primary key default gen_random_uuid(),
   channel text not null unique,
@@ -18,3 +19,23 @@ values
  ('dev','Development','Development releases for explicitly assigned customers.',true,true,30)
 on conflict(channel) do update
 set label=excluded.label,description=excluded.description,sort_order=excluded.sort_order,updated_at=now();
+
+insert into public.release_channels(channel,label,description,enabled,customer_visible,sort_order)
+select distinct r.channel,initcap(replace(r.channel,'_',' ')),'Existing OrbitFS release channel.',true,true,100
+from public.releases r
+where r.channel is not null
+on conflict(channel) do nothing;
+
+alter table public.releases drop constraint if exists releases_channel_fkey;
+alter table public.releases add constraint releases_channel_fkey
+  foreign key(channel) references public.release_channels(channel);
+
+create index if not exists release_channels_enabled_idx on public.release_channels(enabled,customer_visible,sort_order);
+
+create or replace function touch_release_channels_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at=now(); return new; end $$;
+
+drop trigger if exists release_channels_touch on public.release_channels;
+create trigger release_channels_touch before update on public.release_channels
+for each row execute function touch_release_channels_updated_at();
