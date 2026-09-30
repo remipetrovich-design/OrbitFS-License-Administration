@@ -1,3 +1,5 @@
+-- Keep exactly one non-terminal license per customer/product.
+-- Older duplicate current rows are retained as revoked history.
 with ranked as (
   select l.id,
          row_number() over (
