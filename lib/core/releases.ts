@@ -1,36 +1,658 @@
+import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { db } from '../db';
+import { requireReleaseChannel } from './release-channels';
+import { compareOrbitReleaseVersions, isOrbitReleaseVersion, orbitReleaseVersionFamily } from './versioning';
 
-export async function listReleases(includeArchived=false){
-  const sql = includeArchived
-    ? 'select * from releases order by created_at desc'
-    : "select * from releases where coalesce(status,'') <> 'archived' order by created_at desc";
-  return (await db().query(sql)).rows;
+const ALLOWED_UPDATE_COMPONENTS = new Set(['base', 'mcp', 'apex', 'studio', 'orbitfs_base', 'orbitfs_mcp', 'orbitfs_apex', 'orbitfs_studio', 'core']);
+const MAX_ARTIFACT_BYTES = 75 * 1024 * 1024;
+const FORBIDDEN_PATHS = /(^|\/)(\.env(?:$|\.(?!example$))|\.git(?:\/|$)|node_modules(?:\/|$)|\.vercel(?:\/|$))/i;
+
+function canonicalComponents(value: unknown, releaseType: 'base' | 'update') { const values = Array.isArray(value) ? value.map((x) => String(x).trim().toLowerCase()).filter(Boolean) : []; if (releaseType === 'base') return ['base']; const mapped = values.map((x) => x === 'core' || x === 'orbitfs_base' ? 'base' : x === 'orbitfs_mcp' ? 'mcp' : x === 'orbitfs_apex' ? 'apex' : x === 'orbitfs_studio' ? 'studio' : x); return [...new Set(mapped)]; }
+function releaseValidationIdentity(row:any){return {source_sha:String(row.source_sha||''),checksum:String(row.checksum||''),artifact_run_id:Number(row.artifact_run_id||0),artifact_repo:String(row.artifact_repo||row.source_repo||''),artifact_tag:String(row.manifest?.artifactTag||''),artifact_name:String(row.artifact_name||'')};}
+function validationIdentityMatches(row:any){
+ const expected=releaseValidationIdentity(row),actual=row.manifest?.validation?.identity;
+ return Boolean(actual&&expected.source_sha&&expected.checksum&&expected.artifact_run_id&&expected.artifact_repo&&expected.artifact_tag&&expected.artifact_name&&actual.source_sha===expected.source_sha&&actual.checksum===expected.checksum&&Number(actual.artifact_run_id)===expected.artifact_run_id&&String(actual.artifact_repo||'')===expected.artifact_repo&&String(actual.artifact_tag||'')===expected.artifact_tag&&String(actual.artifact_name||'')===expected.artifact_name);
 }
+function validationManifest(row: any, checks: any[], status: 'passed' | 'failed') { return { ...(row.manifest || {}), validation: { status, checked_at: new Date().toISOString(), identity:releaseValidationIdentity(row), checks } }; }
+function inspectPackageFiles(files:any[],options:{label:string;componentMode?:'engine-v3'|'none'}){
+  const list=Array.isArray(files)?files:[];
+  const seen=new Set<string>();
+  const duplicates:string[]=[];
+  const forbidden:string[]=[];
+  const invalidComponents:string[]=[];
+  let invalidPayload=0;
+  let invalidStructure=0;
+  for(const f of list){
+    const file=String(f?.file||'');
+    if(!f||!file||!/^[a-f0-9]{64}$/i.test(String(f.sha256||''))||!Number.isInteger(f.size)||f.size<0||typeof f.data!=='string')invalidStructure++;
+    if(seen.has(file))duplicates.push(file);else seen.add(file);
+    if(FORBIDDEN_PATHS.test(file))forbidden.push(file);
+    if(options.componentMode==='engine-v3'&&!['shared','apex','mcp','studio','core'].includes(String(f?.component||'')))invalidComponents.push(file);
+    try{
+      const data=Buffer.from(String(f?.data||''),'base64');
+      const hash=createHash('sha256').update(data).digest('hex');
+      if(data.length!==Number(f?.size)||hash.toLowerCase()!==String(f?.sha256||'').toLowerCase())invalidPayload++;
+    }catch{invalidPayload++;}
+  }
+  return {label:options.label,list,invalidStructure,duplicates:[...new Set(duplicates)],forbidden,invalidComponents,invalidPayload};
+}
+function appendFileChecks(checks:any[],result:ReturnType<typeof inspectPackageFiles>,prefix='package'){
+  const name=result.label;
+  checks.push({key:`${prefix}_files`,ok:result.list.length>0&&result.invalidStructure===0,message:result.list.length>0&&result.invalidStructure===0?`${name} contains ${result.list.length} structurally valid file(s).`:`${name} file list is empty or malformed.`});
+  checks.push({key:`${prefix}_paths`,ok:result.forbidden.length===0,message:result.forbidden.length?`${name} contains forbidden paths: ${result.forbidden.slice(0,5).join(', ')}`:`${name} paths passed security scan.`});
+  checks.push({key:`${prefix}_duplicates`,ok:result.duplicates.length===0,message:result.duplicates.length?`${name} contains duplicate paths: ${result.duplicates.slice(0,5).join(', ')}`:`${name} contains no duplicate paths.`});
+  if(result.invalidComponents.length)checks.push({key:`${prefix}_components`,ok:false,message:`${name} has files without valid Engine component metadata: ${result.invalidComponents.slice(0,5).join(', ')}`});
+  checks.push({key:`${prefix}_file_integrity`,ok:result.invalidPayload===0,message:result.invalidPayload===0?`Every ${name} file matches its declared size and SHA-256.`:`${result.invalidPayload} ${name} file(s) failed size/SHA-256 verification.`});
+}
+function baseMigrationChainFromFiles(files:any[]){
+  const rows:Array<{id:string;file:string;size:number;sha256:string}>=[];
+  const seen=new Set<string>();
+  let valid=true;
+  for(const entry of Array.isArray(files)?files:[]){
+    const file=String(entry?.file||'').replaceAll('\\','/');
+    const match=file.match(/^supabase\/migrations\/([0-9]{14})_[A-Za-z0-9._-]+\.sql$/);
+    if(!match)continue;
+    const id=match[1];
+    if(seen.has(id)){valid=false;continue;}
+    seen.add(id);
+    if(entry?.encoding!=='base64'||typeof entry?.data!=='string'){valid=false;continue;}
+    const bytes=Buffer.from(entry.data,'base64');
+    const sha256=createHash('sha256').update(bytes).digest('hex');
+    if(bytes.length!==Number(entry?.size)||sha256!==String(entry?.sha256||'').toLowerCase()){valid=false;continue;}
+    rows.push({id,file,size:bytes.length,sha256});
+  }
+  rows.sort((a,b)=>a.id.localeCompare(b.id));
+  for(let index=1;index<rows.length;index++)if(rows[index].id<=rows[index-1].id)valid=false;
+  return {rows,valid};
+}
+async function scanPackage(row:any,bytes:Buffer){
+  const checks:any[]=[];
+  if(!String(row.artifact_name||'').endsWith('.json.gz')){
+    checks.push({key:'package_format',ok:false,message:'Release artifact must be the OrbitFS .json.gz package format.'});
+    return checks;
+  }
+  try{
+    const raw=gunzipSync(bytes).toString('utf8');
+    const pkg=JSON.parse(raw);
+    const validReleaseVersion=(value:any)=>isOrbitReleaseVersion(String(value||'').trim());
+    const isBundle=pkg.format==='orbitfs-update-bundle-v3'&&Number(pkg.schemaVersion)===3;
 
-export async function createRelease(input:{
-  productId:string;channel:string;version:string;releaseType:'base'|'update';
-  sourceRepo?:string|null;sourceRef?:string|null;sourceSha?:string|null;
-  artifactUrl?:string|null;checksum?:string|null;notes?:string|null;
-  manifest?:Record<string,unknown>;actor?:string;
-}){
-  const result=await db().query(
-    `insert into releases(product_id,channel,version,release_type,source_repo,source_ref,source_sha,artifact_url,checksum_sha256,notes,manifest,review_status,status,created_by)
-     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,'pending','draft',$12)
-     returning *`,
-    [input.productId,input.channel,input.version,input.releaseType,input.sourceRepo??null,input.sourceRef??null,input.sourceSha??null,input.artifactUrl??null,input.checksum??null,input.notes??null,JSON.stringify(input.manifest||{}),input.actor??'api']
+    if(isBundle){
+      const components=canonicalComponents(pkg.components,'update');
+      const recordComponents=canonicalComponents(row.manifest?.components,'update');
+      const validTargets=components.length>0&&components.every((x:string)=>['base','mcp','apex','studio'].includes(x));
+      const componentRecordMatches=[...components].sort().join(',')===[...recordComponents].sort().join(',');
+      const engineTargets=components.filter((x:string)=>x!=='base');
+      const wantsBase=components.includes('base');
+      const panel=pkg?.payloads?.panel??null;
+      const engine=pkg?.payloads?.engine??null;
+      const protocol=Number(pkg.minimumEngineDeployerProtocol);
+      const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true;
+      const componentVersions=pkg.componentVersions&&typeof pkg.componentVersions==='object'&&!Array.isArray(pkg.componentVersions)?pkg.componentVersions:null;
+      const componentVersionsValid=Boolean(componentVersions&&components.every((component:string)=>{
+        const value=String(componentVersions[component]||'').trim();
+        if(component==='base')return value===String(pkg.minimumBaseVersion||'').trim();
+        return validReleaseVersion(value);
+      })&&Object.keys(componentVersions).every((key)=>components.includes(String(key))));
+      const database=pkg?.database&&typeof pkg.database==='object'&&!Array.isArray(pkg.database)?pkg.database:null;
+      const migrations=Array.isArray(database?.migrations)?database.migrations:[];
+      const migrationIds=new Set<string>();
+      const changedMigrationCount=Number(pkg.databaseChangedMigrationCount??0);
+      let migrationsValid=Boolean(database&&database.format==='orbitfs-db-migrations-v1'&&database.mode==='shared-panel'&&database.provider==='supabase'&&Number(database.migrationCount||0)===migrations.length&&Number(pkg.databaseMigrationCount||0)===migrations.length&&Number.isInteger(changedMigrationCount)&&changedMigrationCount>=0&&changedMigrationCount<=migrations.length);
+      for(const migration of migrations){
+        const id=String(migration?.id||''),file=String(migration?.file||'').replaceAll('\\','/');
+        const match=file.match(/^supabase\/migrations\/(shared|base|apex|mcp|studio)\/(\d{14}_[A-Za-z0-9._-]+)\.sql$/);
+        const component=String(migration?.component||'').toLowerCase();
+        if(!match||id!==match[1]+'.'+match[2]||migrationIds.has(id)||component!==match[1]||migration?.encoding!=='base64'||typeof migration?.data!=='string'){migrationsValid=false;continue;}
+        if(component!=='shared'&&!components.includes(component))migrationsValid=false;
+        migrationIds.add(id);
+        const sql=Buffer.from(migration.data,'base64');
+        const sha=createHash('sha256').update(sql).digest('hex');
+        const sqlText=sql.toString('utf8');
+        if(sql.length!==Number(migration.size)||sha!==String(migration.sha256||'').toLowerCase()||/\b(?:begin|commit|rollback)\s*;/i.test(sqlText)||/\b(?:drop\s+table|drop\s+schema|truncate\s+(?:table\s+)?|alter\s+table[\s\S]{0,300}?drop\s+column)\b/i.test(sqlText))migrationsValid=false;
+      }
+      const schemaChanged=pkg?.releaseAnalysis?.flags?.schemaChanged===true;
+      if(schemaChanged&&changedMigrationCount<1)migrationsValid=false;
+      const engineDatabaseOk=!engine||JSON.stringify(engine.database||null)===JSON.stringify(database);
+      const databaseOk=migrationsValid&&engineDatabaseOk;
+      checks.push({key:'package_manifest',ok:Boolean(pkg.version&&pkg.sourceCommit&&validTargets&&componentRecordMatches&&componentVersionsValid&&pkg.payloads&&typeof pkg.payloads==='object'),message:'Update bundle identity, targets, component versions and payload container are '+(pkg.version&&pkg.sourceCommit&&validTargets&&componentRecordMatches&&componentVersionsValid?'valid.':'invalid.')});
+      checks.push({key:'package_components_match',ok:componentRecordMatches,message:componentRecordMatches?'Release record components exactly match the packaged Update targets.':'Release record components do not match the packaged Update targets.'});
+      checks.push({key:'package_update_schema',ok:databaseOk,message:databaseOk?(migrations.length?`Customer database migration contract contains ${migrations.length} verified immutable migration(s).`:'Update release has a valid empty customer database migration contract.'):'Update database/schema changes require a valid checksummed orbitfs-db-migrations-v1 contract that matches the Engine payload.'});
+      checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?'Minimum Base version, deployer protocol and checkpoint contract are valid.':'Update bundle compatibility metadata is invalid.'});
+
+      const panelOk=!wantsBase?panel===null:Boolean(panel&&panel.format==='orbitfs-base-deployment-v2'&&Number(panel.schemaVersion)===2&&String(panel.version||'')===String(pkg.version||'')&&String(panel.baseVersion||'')===String(pkg.minimumBaseVersion||'')&&String(panel.sourceCommit||'')===String(pkg.sourceCommit||'')&&Array.isArray(panel.components)&&panel.components.includes('base'));
+      checks.push({key:'package_panel_payload',ok:panelOk,message:wantsBase?(panelOk?'Base target has a valid Panel update payload.':'Base target requires a valid Panel update payload composed on the declared minimum Base version.'):(panel===null?'No Panel payload is present for an Engine-only update.':'Panel payload must be null when Base is not selected.')});
+
+      const engineComponents=engine?canonicalComponents(engine.components,'update').filter((x:string)=>x!=='base'):[];
+      const expectedEngine=[...engineTargets].sort().join(',');
+      const actualEngine=[...engineComponents].sort().join(',');
+      const engineFormat=engine&&['orbitfs-engine-release-v2','orbitfs-engine-release-v3'].includes(String(engine.format||''));
+      const engineOk=!engineTargets.length?engine===null:Boolean(engine&&engineFormat&&String(engine.version||'')===String(pkg.version||'')&&String(engine.sourceCommit||'')===String(pkg.sourceCommit||'')&&String(engine.minimumBaseVersion||'')===String(pkg.minimumBaseVersion||'')&&Number(engine.minimumEngineDeployerProtocol)===protocol&&engine.checkpointRequired===true&&actualEngine===expectedEngine);
+      checks.push({key:'package_engine_payload',ok:engineOk,message:engineTargets.length?(engineOk?'Engine/add-on targets have a valid Engine Host payload.':'Engine/add-on targets require a matching Engine Host payload.'):(engine===null?'No Engine payload is present for a Base-only update.':'Engine payload must be null when no Engine/add-on target is selected.')});
+
+      let total=0;
+      if(panel){
+        const inspected=inspectPackageFiles(panel.files,{label:'Panel payload'});
+        appendFileChecks(checks,inspected,'package_panel');
+        total+=inspected.list.length;
+        checks.push({key:'package_panel_file_count',ok:Number(panel.fileCount||0)===inspected.list.length,message:`Panel payload declares ${Number(panel.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
+      }
+      if(engine){
+        const inspected=inspectPackageFiles(engine.files,{label:'Engine payload',componentMode:Number(engine.schemaVersion||0)>=3?'engine-v3':'none'});
+        appendFileChecks(checks,inspected,'package_engine');
+        total+=inspected.list.length;
+        checks.push({key:'package_engine_file_count',ok:Number(engine.fileCount||0)===inspected.list.length,message:`Engine payload declares ${Number(engine.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
+      }
+      checks.push({key:'package_files',ok:total>0&&Number(pkg.fileCount||0)===total,message:`Update bundle contains ${total} nested file(s).`});
+      checks.push({key:'package_version',ok:String(pkg.version||'')===String(row.version||''),message:String(pkg.version||'')===String(row.version||'')?'Package version matches release version.':'Package version does not match release version.'});
+      checks.push({key:'package_source',ok:String(pkg.sourceCommit||'')===String(row.source_sha||''),message:String(pkg.sourceCommit||'')===String(row.source_sha||'')?'Package source commit matches release source.':'Package source commit does not match release source.'});
+      return checks;
+    }
+
+    const files=Array.isArray(pkg.files)?pkg.files:[];
+    if(row.release_type==='base'){
+      const packageDatabaseSchema=String(pkg.databaseSchemaVersion||pkg.releaseInfo?.databaseSchemaVersion||'').trim();
+      const releaseDatabaseSchema=String(row.manifest?.databaseSchemaVersion||row.manifest?.releaseInfo?.databaseSchemaVersion||'').trim();
+      const schemaPath=String(pkg.databaseSchemaPath||pkg.releaseInfo?.databaseSchemaPath||'supabase/customer-schema.sql').trim();
+      const packageSchemaHash=String(pkg.databaseSchemaSha256||pkg.releaseInfo?.databaseSchemaSha256||'').trim().toLowerCase();
+      const releaseSchemaHash=String(row.manifest?.databaseSchemaSha256||row.manifest?.releaseInfo?.databaseSchemaSha256||'').trim().toLowerCase();
+      const schemaFile=files.find((file:any)=>String(file?.file||'')===schemaPath);
+      let actualSchemaHash='',schemaPayloadOk=false;
+      if(schemaFile?.data&&schemaFile?.encoding==='base64'){
+        const bytes=Buffer.from(schemaFile.data,'base64');
+        actualSchemaHash=createHash('sha256').update(bytes).digest('hex');
+        const sql=bytes.toString('utf8');
+        schemaPayloadOk=bytes.length>0&&['orbitfs_users','orbitfs_workspaces','orbitfs_workspace_members','orbitfs_files','orbitfs_settings','orbitfs_license','orbitfs_addons','orbitfs_audit_log'].every((name)=>sql.includes(name));
+      }
+      const migrationCount=Number(pkg.databaseMigrationCount??pkg.releaseInfo?.databaseMigrationCount??0);
+      const latestMigration=String(pkg.databaseLatestMigration||pkg.releaseInfo?.databaseLatestMigration||'').trim();
+      const releaseMigrationCount=Number(row.manifest?.databaseMigrationCount??row.manifest?.releaseInfo?.databaseMigrationCount??0);
+      const releaseLatestMigration=String(row.manifest?.databaseLatestMigration||row.manifest?.releaseInfo?.databaseLatestMigration||'').trim();
+      const migrationChain=baseMigrationChainFromFiles(files);
+      const migrationChainOk=Boolean(
+        migrationChain.valid
+        &&migrationChain.rows.length===migrationCount
+        &&migrationChain.rows.at(-1)?.id===latestMigration
+      );
+      const databaseSnapshotOk=Boolean(
+        schemaPayloadOk
+        &&packageSchemaHash
+        &&releaseSchemaHash
+        &&actualSchemaHash===packageSchemaHash
+        &&packageSchemaHash===releaseSchemaHash
+        &&Number.isInteger(migrationCount)
+        &&migrationCount>0
+        &&migrationCount===releaseMigrationCount
+        &&/^\d{14}$/.test(latestMigration)
+        &&latestMigration===releaseLatestMigration
+        &&migrationChainOk
+      );
+      const recordManifest=row.manifest&&typeof row.manifest==='object'?row.manifest:{};
+      const packageComponents=canonicalComponents(pkg.components,'base');
+      const recordComponents=canonicalComponents(recordManifest.components,'base');
+      const packageSettings=pkg.projectSettings&&typeof pkg.projectSettings==='object'&&!Array.isArray(pkg.projectSettings)?pkg.projectSettings:{};
+      const recordSettings=recordManifest.projectSettings&&typeof recordManifest.projectSettings==='object'&&!Array.isArray(recordManifest.projectSettings)?recordManifest.projectSettings:{};
+      const projectSettingsMatch=
+        String(recordSettings.framework||'')===String(packageSettings.framework||'')
+        &&String(recordSettings.installCommand||'')===String(packageSettings.installCommand||'')
+        &&String(recordSettings.buildCommand||'')===String(packageSettings.buildCommand||'');
+      const handoffMatches=String(recordManifest.format||'')===String(pkg.format||'')
+        &&Number(recordManifest.schemaVersion||0)===Number(pkg.schemaVersion||0)
+        &&Number(recordManifest.fileCount||0)===Number(pkg.fileCount||0)
+        &&Number(pkg.fileCount||0)===files.length
+        &&packageComponents.join(',')===recordComponents.join(',')
+        &&projectSettingsMatch;
+      checks.push({key:'package_base_handoff',ok:handoffMatches,message:handoffMatches?'License Manager handoff metadata matches the embedded Base package manifest.':'License Manager handoff metadata must match the embedded Base package format, schema version, file count, components and project settings.'});
+      checks.push({key:'package_base_format',ok:pkg.format==='orbitfs-base-deployment-v2'&&Number(pkg.schemaVersion)===2,message:pkg.format==='orbitfs-base-deployment-v2'&&Number(pkg.schemaVersion)===2?'Base artifact uses orbitfs-base-deployment-v2.':'Base artifact must use orbitfs-base-deployment-v2 package schema 2.'});
+      checks.push({key:'database_schema_version',ok:Boolean(packageDatabaseSchema&&releaseDatabaseSchema&&packageDatabaseSchema===releaseDatabaseSchema),message:packageDatabaseSchema&&releaseDatabaseSchema&&packageDatabaseSchema===releaseDatabaseSchema?`Base database schema version ${packageDatabaseSchema} is consistent.`:'Base artifact and release record must declare the same databaseSchemaVersion.'});
+      checks.push({key:'database_migration_chain',ok:migrationChainOk,message:migrationChainOk?`Base artifact contains ${migrationChain.rows.length} verified migration file(s) through ${latestMigration}.`:'Base artifact migration files must exactly match databaseMigrationCount/databaseLatestMigration and pass size/SHA-256 verification.'});
+      checks.push({key:'database_schema_snapshot',ok:databaseSnapshotOk,message:databaseSnapshotOk?`Base artifact contains the verified customer DB snapshot (${migrationCount} migrations, latest ${latestMigration}).`:'Base artifact must contain a checksummed supabase/customer-schema.sql generated from the authoritative migration chain.'});
+    }
+    const isEngineV3=pkg.format==='orbitfs-engine-release-v3';
+    const inspected=inspectPackageFiles(files,{label:'Release package',componentMode:isEngineV3?'engine-v3':'none'});
+    const validState=!isEngineV3||(pkg.componentVersions&&typeof pkg.componentVersions==='object'&&pkg.minimumBaseVersion&&Array.isArray(pkg.components));
+    const engineCompatibility=row.release_type!=='update'||(Array.isArray(pkg.components)&&pkg.components.length>0&&Number.isInteger(Number(pkg.minimumEngineDeployerProtocol))&&Number(pkg.minimumEngineDeployerProtocol)>=1&&validReleaseVersion(pkg.minimumBaseVersion));
+    checks.push({key:'package_manifest',ok:Boolean(pkg.schemaVersion&&pkg.version&&pkg.sourceCommit&&inspected.invalidStructure===0&&validState),message:(inspected.invalidStructure===0&&validState)?'Package manifest structure and target release state are valid.':'Package manifest structure or target release state is invalid.'});
+    if(row.release_type==='update')checks.push({key:'package_engine_compatibility',ok:engineCompatibility,message:engineCompatibility?'Engine minimum Base version, deployer protocol and component metadata are valid.':'Engine artifact is missing or has invalid minimum Base version, deployer protocol or component metadata.'});
+    appendFileChecks(checks,inspected,'package');
+    checks.push({key:'package_version',ok:String(pkg.version||'')===String(row.version||''),message:String(pkg.version||'')===String(row.version||'')?'Package version matches release version.':'Package version does not match release version.'});
+    checks.push({key:'package_source',ok:String(pkg.sourceCommit||'')===String(row.source_sha||''),message:String(pkg.sourceCommit||'')===String(row.source_sha||'')?'Package source commit matches release source.':'Package source commit does not match release source.'});
+    checks.push({key:'package_file_count',ok:files.length>0&&Number(pkg.fileCount||files.length)===files.length,message:`Package contains ${files.length} files.`});
+  }catch(error){
+    checks.push({key:'package_scan',ok:false,message:error instanceof Error?`Package scan failed: ${error.message}`:'Package scan failed.'});
+  }
+  return checks;
+}
+function baseDatabaseManifestPatch(row:any,bytes:Buffer){
+  if(row.release_type!=='base')return null;
+  try{
+    const pkg=JSON.parse(gunzipSync(bytes).toString('utf8'));
+    if(pkg?.format!=='orbitfs-base-deployment-v2'||Number(pkg?.schemaVersion)!==2)return null;
+    const files=Array.isArray(pkg.files)?pkg.files:[];
+    const databaseSchemaVersion=String(pkg.databaseSchemaVersion||pkg.releaseInfo?.databaseSchemaVersion||'').trim();
+    const databaseSchemaPath=String(pkg.databaseSchemaPath||pkg.releaseInfo?.databaseSchemaPath||'supabase/customer-schema.sql').trim();
+    const databaseSchemaSha256=String(pkg.databaseSchemaSha256||pkg.releaseInfo?.databaseSchemaSha256||'').trim().toLowerCase();
+    const databaseMigrationCount=Number(pkg.databaseMigrationCount??pkg.releaseInfo?.databaseMigrationCount??0);
+    const databaseLatestMigration=String(pkg.databaseLatestMigration||pkg.releaseInfo?.databaseLatestMigration||'').trim();
+    const schemaFile=files.find((file:any)=>String(file?.file||'')===databaseSchemaPath);
+    const migrationChain=baseMigrationChainFromFiles(files);
+    if(!databaseSchemaVersion||databaseSchemaPath!=='supabase/customer-schema.sql'||!/^[a-f0-9]{64}$/.test(databaseSchemaSha256)||!Number.isInteger(databaseMigrationCount)||databaseMigrationCount<1||!/^\d{14}$/.test(databaseLatestMigration)||schemaFile?.encoding!=='base64'||typeof schemaFile?.data!=='string'||!migrationChain.valid||migrationChain.rows.length!==databaseMigrationCount||migrationChain.rows.at(-1)?.id!==databaseLatestMigration)return null;
+    const schemaBytes=Buffer.from(schemaFile.data,'base64');
+    if(createHash('sha256').update(schemaBytes).digest('hex')!==databaseSchemaSha256)return null;
+    return {databaseSchemaVersion,databaseSchemaPath,databaseSchemaSha256,databaseMigrationCount,databaseLatestMigration,databaseMigrations:migrationChain.rows};
+  }catch{return null;}
+}
+async function checkArtifact(row: any) {
+  const checks: any[] = [];
+  const expected = String(row.checksum || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/i.test(expected)) return { checks: [{ key: 'checksum', ok: false, message: 'A SHA-256 checksum is required.' }] };
+
+  const repo = String(row.artifact_repo || row.source_repo || '').trim();
+  const artifactName = String(row.artifact_name || '').trim();
+  const artifactTag = String(row.manifest?.artifactTag || '').trim();
+  if (!repo || !artifactName || (row.release_type==='base'&&!artifactTag)) return { checks: [{ key: 'artifact_reference', ok: false, message: row.release_type==='base' ? 'Base artifact repository, GitHub release tag and filename are required.' : 'Artifact repository and filename are missing.' }] };
+  if(row.release_type==='base'&&artifactName!==`orbitfs-base-v${row.version}.json.gz`)return {checks:[{key:'artifact_reference',ok:false,message:`Base artifact filename must be orbitfs-base-v${row.version}.json.gz.`}]};
+
+  const tokens = [...new Set([
+    String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN || '').trim(),
+    String(process.env.GITHUB_RELEASE_TOKEN || '').trim(),
+    String(process.env.GITHUB_TOKEN || '').trim(),
+    ''
+  ])];
+
+  const githubFetch = async (url:string, accept:string) => {
+    let lastStatus = 0;
+    for (const token of tokens) {
+      const headers = new Headers({ accept, 'user-agent': 'OrbitFS-License-Master/2', 'x-github-api-version': '2022-11-28' });
+      if (token) headers.set('authorization', `Bearer ${token}`);
+      const response = await fetch(url, { headers, redirect: 'follow', cache: 'no-store' });
+      lastStatus = response.status;
+      if (response.ok) return response;
+      if (![401,403,404].includes(response.status)) return response;
+    }
+    return new Response(null,{status:lastStatus||404});
+  };
+  const downloadGithubAsset = async (apiUrl:string) => {
+    const metadata = await githubFetch(apiUrl,'application/vnd.github+json');
+    let browserUrl = '';
+    if(metadata.ok){
+      try{const value:any=await metadata.clone().json();browserUrl=String(value?.browser_download_url||'').trim();}catch{}
+    }
+    const apiDownload = await githubFetch(apiUrl,'application/octet-stream');
+    if(apiDownload.ok)return apiDownload;
+    if(browserUrl){
+      const browserDownload=await githubFetch(browserUrl,'application/octet-stream');
+      if(browserDownload.ok)return browserDownload;
+      if(![401,403,404].includes(browserDownload.status))return browserDownload;
+    }
+    return apiDownload;
+  };
+
+  try {
+    let assetUrl = String(row.artifact_url || '').trim();
+
+    // Prefer resolving the current release asset from the recorded tag. This avoids
+    // trusting a stale asset URL and proves the artifact still belongs to the
+    // recorded GitHub release.
+    if (artifactTag) {
+      const releaseResponse = await githubFetch(
+        `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(artifactTag)}`,
+        'application/vnd.github+json'
+      );
+      if (releaseResponse.ok) {
+        const release: any = await releaseResponse.json();
+        const asset = Array.isArray(release.assets) ? release.assets.find((item: any) => String(item.name || '') === artifactName) : null;
+        if (!asset?.url) return { checks: [{ key: 'artifact_reachable', ok: false, message: `GitHub release does not contain ${artifactName}.` }] };
+        assetUrl = String(asset.url);
+      } else if (!assetUrl) {
+        return { checks: [{ key: 'artifact_reachable', ok: false, message: `GitHub release artifact could not be located (HTTP ${releaseResponse.status}). Check License Manager GitHub token Contents access to ${repo}.` }] };
+      }
+    }
+
+    if (!assetUrl) return { checks: [{ key: 'artifact_reference', ok: false, message: 'Artifact tag or URL is missing.' }] };
+
+    const response = /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/releases\/assets\/\d+$/.test(assetUrl)
+      ? await downloadGithubAsset(assetUrl)
+      : await githubFetch(assetUrl, 'application/octet-stream');
+    if (!response.ok) return { checks: [{ key: 'artifact_reachable', ok: false, message: `Artifact returned HTTP ${response.status}. Check License Manager GitHub token Contents access to ${repo}.` }] };
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > MAX_ARTIFACT_BYTES) return { checks: [{ key: 'artifact_size', ok: false, message: `Artifact exceeds ${MAX_ARTIFACT_BYTES} bytes.` }] };
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_ARTIFACT_BYTES) return { checks: [{ key: 'artifact_size', ok: false, message: `Artifact exceeds ${MAX_ARTIFACT_BYTES} bytes.` }] };
+    const actual = createHash('sha256').update(bytes).digest('hex');
+    const checksumMatches=actual===expected;
+    const manifestPatch=checksumMatches?baseDatabaseManifestPatch(row,bytes):null;
+    const scanRow=manifestPatch?{...row,manifest:{...(row.manifest||{}),...manifestPatch}}:row;
+    checks.push({ key: 'artifact_reachable', ok: true, message: `Artifact downloaded (${bytes.length} bytes).` });
+    checks.push({ key: 'checksum', ok: checksumMatches, message: checksumMatches ? 'SHA-256 checksum matches.' : 'SHA-256 checksum does not match the release record.' });
+    checks.push(...await scanPackage(scanRow,bytes));
+    return { checks, manifestPatch };
+  } catch (error) {
+    return { checks: [{ key: 'artifact_reachable', ok: false, message: error instanceof Error ? error.message : 'Artifact could not be downloaded.' }] };
+  }
+}
+function enrichValidationChecks(checks:any[]){return checks.map((check:any)=>{if(check.ok)return check;const key=String(check.key||"validation");const fixes:any={product:"Activate or restore the release product in License Master.",version:"Provide a valid release version.",changelog:"Add the generated changelog/release notes before approval.",source:"Ensure source repository, ref and commit SHA are recorded.",components:"Correct the manifest component list for the release type.",manifest:"Provide a valid release manifest.",ci:"Fix the originating GitHub Actions build/run and submit the resulting candidate again.",artifact_reference:"Provide the canonical artifact repository, immutable GitHub release tag and exact filename. Base releases must use orbitfs-base-v<version>.json.gz; the workflow does not need to send an artifact URL.",checksum:"Generate the correct SHA-256 checksum for the exact artifact.",artifact_reachable:"Make the release artifact reachable from License Master without authentication that is unavailable to the validator.",artifact_size:"Reduce the release artifact to the supported size limit.",package_format:"Generate the supported OrbitFS .json.gz package format.",package_manifest:"Fix the package manifest structure and required release metadata.",package_paths:"Remove forbidden files or paths from the release package.",package_duplicates:"Remove duplicate paths from the release package.",package_version:"Make the package version match the License Manager release version.",package_source:"Make the package source commit match the recorded release source SHA.",package_files:"Regenerate the package file list/file count.",package_file_integrity:"Regenerate the package so every file size and SHA-256 matches its payload.",package_scan:"Fix the package parsing/structure error and regenerate the artifact.",package_engine_compatibility:"Regenerate the Engine artifact with a valid minimum Base version, deployer protocol and component list.",package_base_handoff:"Regenerate the Stage 1 handoff from the exact embedded Base package manifest; do not reconstruct file count, components, package format or Vercel project settings separately.",package_base_format:"Regenerate the Base artifact using orbitfs-base-deployment-v2 package schema 2.",database_schema_version:"Declare the customer database schema version separately as databaseSchemaVersion in both the Base artifact and License Manager release manifest.",database_migration_chain:"Package the complete immutable supabase/migrations chain and make databaseMigrationCount/databaseLatestMigration match the verified files.",package_update_schema:"Add a new immutable supabase/migrations/*.sql file and regenerate the Update Bundle so the orbitfs-db-migrations-v1 ids, sizes and SHA-256 checksums match the Engine payload."};const fix=fixes[key]||"Inspect the failing validation message and correct the underlying release data, artifact, or build issue.";return {...check,fix,prompt:"Fix the "+key+" validation failure shown above. Inspect the related release data, artifact, workflow or code, make the smallest production-safe change, then run the full License Master validation again. Do not change unrelated files."};});}
+
+async function checkWorkflow(row: any) {
+  const runId = Number(row.artifact_run_id || 0);
+  const repo = String(row.artifact_repo || row.source_repo || '').trim();
+  if (!runId || !repo || !repo.includes('/')) return { key: 'ci', ok: false, message: 'Release CI run metadata is missing.' };
+  const headers = new Headers({ accept: 'application/vnd.github+json', 'user-agent': 'OrbitFS-License-Master/2', 'x-github-api-version': '2022-11-28' });
+  const token = String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN || process.env.GITHUB_RELEASE_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  if (token) headers.set('authorization', `Bearer ${token}`);
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}`, { headers, cache: 'no-store' });
+    if (!response.ok) return { key: 'ci', ok: false, message: `GitHub Actions run could not be verified (HTTP ${response.status}).` };
+    const run: any = await response.json();
+    const jobsResponse = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs?per_page=100`, { headers, cache: 'no-store' });
+    if (!jobsResponse.ok) return { key: 'ci', ok: false, message: `GitHub Actions jobs could not be verified (HTTP ${jobsResponse.status}).` };
+    const jobs: any = await jobsResponse.json();
+    const candidates = Array.isArray(jobs.jobs) ? jobs.jobs.filter((job:any) => !/technical validation|license master technical validation/i.test(String(job.name || ''))) : [];
+    const buildJob = candidates.find((job:any) => /build|publish|candidate/i.test(String(job.name || ''))) || candidates[0];
+    const ok = Boolean(buildJob && buildJob.status === 'completed' && buildJob.conclusion === 'success');
+    return { key: 'ci', ok, message: ok ? `GitHub Actions build job completed successfully (${buildJob.name}).` : buildJob ? `GitHub Actions build job is ${buildJob.status || 'unknown'} / ${buildJob.conclusion || 'unknown'}.` : `GitHub Actions run ${run.status || 'unknown'} / ${run.conclusion || 'unknown'} has no successful build job.` };
+  } catch (error) {
+    return { key: 'ci', ok: false, message: error instanceof Error ? error.message : 'Release CI could not be verified.' };
+  }
+}
+export async function listReleases(includeArchived=false){const where=includeArchived?'':'where r.archived_at is null';return(await db().query(`select r.*,p.slug product,p.name product_name from releases r join products p on p.id=r.product_id ${where} order by r.created_at desc`)).rows;}
+export async function getLatestRelease(productSlug:string,channel='stable',releaseType:'base'|'update'='update'){const result=await db().query(`select r.id,r.version,r.channel,r.release_type,r.artifact_url,r.checksum,r.source_repo,r.source_ref,r.source_sha,r.artifact_name,r.artifact_repo,r.artifact_run_id,r.vercel_ready,r.supabase_ready,r.deployment_status,r.published_at,r.manifest,p.slug product from releases r join products p on p.id=r.product_id where p.slug=$1 and p.status='active' and r.channel=$2 and r.release_type=$3 and r.status='published' and r.review_status='approved' order by r.published_at desc nulls last,r.created_at desc limit 1`,[productSlug,channel,releaseType]);return result.rows[0]??null;}
+export async function createRelease(input:{productId:string;channel:string;version:string;releaseType:'base'|'update';sourceRepo?:string|null;sourceRef?:string|null;artifactUrl?:string|null;checksum?:string|null;notes?:string|null;publish?:boolean;actorUserId?:string|null;actor?:string;reviewStatus?:'pending'|'approved'|'rejected';deploymentStatus?:'not_started'|'queued'|'deploying'|'deployed'|'failed';sourceSha?:string|null;artifactName?:string|null;artifactRepo?:string|null;artifactRunId?:number|null;vercelReady?:boolean;supabaseReady?:boolean;customerPublicationRepo?:string|null;manifest?:any;revision?:number;supersedesReleaseId?:string|null}){
+ const pool=db();
+ const settings=(await pool.query('select system_enabled,release_system_enabled,deployment_enabled from system_settings where id=true')).rows[0];
+ if(!settings?.system_enabled||!settings.release_system_enabled||(input.releaseType==='base'&&!settings.deployment_enabled))throw new Error('Release/deployment system is offline');
+ if(!isOrbitReleaseVersion(input.version))throw new Error('Invalid OrbitFS release version. Use a numeric version such as 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0.');
+ await requireReleaseChannel(input.channel);
+ const reviewStatus=input.reviewStatus??'pending';
+ const publish=Boolean(input.publish&&reviewStatus==='approved');
+ const incomingManifest={...(input.manifest||{}),components:canonicalComponents(input.manifest?.components,input.releaseType)};
+ const existing=(await pool.query(
+  `select * from releases
+   where product_id=$1 and channel=$2 and version=$3 and release_type=$4 and archived_at is null
+   order by revision desc,created_at desc limit 1`,
+  [input.productId,input.channel,input.version,input.releaseType]
+ )).rows[0];
+
+ if(existing){
+  if(existing.status==='published')throw new Error('Published release already exists for this product, channel, version and type.');
+  if(existing.review_status==='rejected')throw new Error('Rejected release is closed. Use a new version instead of creating another attempt.');
+  if(['disabled','superseded','withdrawn'].includes(String(existing.status||'')))throw new Error('Closed release is immutable. Restore/archive it explicitly or use a new version.');
+  const attemptHistory=Array.isArray(existing.manifest?.build_attempts)?existing.manifest.build_attempts:[];
+  const attemptNumber=attemptHistory.length+1;
+  const buildAttempt={
+   attempt:attemptNumber,
+   artifact_run_id:input.artifactRunId??null,
+   artifact_repo:input.artifactRepo??null,
+   source_sha:input.sourceSha??null,
+   received_at:new Date().toISOString()
+  };
+  const manifest={...(existing.manifest||{}),...incomingManifest,build_attempts:[...attemptHistory,buildAttempt]};
+  delete manifest.validation;
+  manifest.validation_invalidated={reason:'new_build_attempt',at:new Date().toISOString(),artifact_run_id:input.artifactRunId??null,source_sha:input.sourceSha??null,checksum:input.checksum??null};
+  const row=(await pool.query(
+   `update releases set
+     source_repo=$2,source_ref=$3,artifact_url=$4,checksum=$5,notes=$6,status='draft',published_at=null,
+     review_status='pending',deployment_status=$7,source_sha=$8,artifact_name=$9,artifact_repo=$10,artifact_run_id=$11,
+     vercel_ready=$12,supabase_ready=$13,customer_publication_repo=$14,manifest=$15
+    where id=$1 returning *`,
+   [existing.id,input.sourceRepo??existing.source_repo,input.sourceRef??existing.source_ref,input.artifactUrl??null,input.checksum??null,input.notes??null,input.deploymentStatus??'not_started',input.sourceSha??null,input.artifactName??null,input.artifactRepo??null,input.artifactRunId??null,input.vercelReady??false,input.supabaseReady??false,input.customerPublicationRepo??existing.customer_publication_repo??null,manifest]
+  )).rows[0];
+  await pool.query(
+   `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+    values($1,$2,'release.attempt.intake','release',$3,$4)`,
+   [input.actorUserId??null,input.actor??'integration-api',row.id,JSON.stringify({version:input.version,release_type:input.releaseType,attempt:attemptNumber,artifact_run_id:input.artifactRunId??null})]
   );
-  return result.rows[0];
+  try{return await validateRelease(row.id,input.actorUserId??null,input.actor??'integration-api');}
+  catch(error){
+   const failedManifest={...manifest,validation:{status:'failed',checked_at:new Date().toISOString(),checks:[{key:'validation_runner',ok:false,message:error instanceof Error?error.message:'Automatic validation failed.'}]}};
+   return (await pool.query('update releases set manifest=$2,status=\'draft\',review_status=\'pending\' where id=$1 returning *',[row.id,failedManifest])).rows[0];
+  }
+ }
+
+ const manifest={...incomingManifest,build_attempts:[{attempt:1,artifact_run_id:input.artifactRunId??null,artifact_repo:input.artifactRepo??null,source_sha:input.sourceSha??null,received_at:new Date().toISOString()}]};
+ const result=await pool.query(
+  `insert into releases(product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id)
+   values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning *`,
+  [input.productId,input.channel,input.version,input.releaseType,input.sourceRepo??null,input.sourceRef??null,input.artifactUrl??null,input.checksum??null,input.notes??null,publish?'published':'draft',publish?new Date():null,reviewStatus,input.deploymentStatus??'not_started',input.sourceSha??null,input.artifactName??null,input.artifactRepo??null,input.artifactRunId??null,input.vercelReady??false,input.supabaseReady??false,input.customerPublicationRepo??null,manifest,input.revision??1,input.supersedesReleaseId??null]
+ );
+ const row=result.rows[0];
+ await pool.query(
+  `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+   values($1,$2,'release.create','release',$3,$4)`,
+  [input.actorUserId??null,input.actor??'integration-api',row.id,JSON.stringify({version:input.version,release_type:input.releaseType,review_status:reviewStatus,published:Boolean(publish),components:manifest.components||[],attempt:1})]
+ );
+ if(!publish&&row.id){
+  try{return await validateRelease(row.id,input.actorUserId??null,input.actor??'integration-api');}
+  catch(error){
+   const failedManifest={...manifest,validation:{status:'failed',checked_at:new Date().toISOString(),checks:[{key:'validation_runner',ok:false,message:error instanceof Error?error.message:'Automatic validation failed.'}]}};
+   return (await pool.query('update releases set manifest=$2,status=\'draft\',review_status=\'pending\' where id=$1 returning *',[row.id,failedManifest])).rows[0];
+  }
+ }
+ return row;
 }
 
-export async function validateRelease(id:string,_unused?:unknown,actor?:string){
-  const existing=(await db().query('select * from releases where id=$1 limit 1',[id])).rows[0];
-  if(!existing)return null;
-  const checks=[
-    {name:'identity',status:existing.version&&existing.release_type?'passed':'failed'},
-    {name:'checksum',status:existing.checksum_sha256?'passed':'failed'},
-  ];
-  const status=checks.every(c=>c.status==='passed')?'passed':'failed';
-  const manifest={...(existing.manifest||{}),validation:{status,checks,actor:actor??'api'}};
-  const row=(await db().query('update releases set manifest=$2::jsonb, updated_at=now() where id=$1 returning *',[id,JSON.stringify(manifest)])).rows[0];
-  return row;
+async function validateSourceIdentity(row:any){
+ const expected=row.release_type==='base'
+  ? {repo:'lucaskerim123/V1-vercel-base',ref:'base-release'}
+  : {repo:'lucaskerim123/V1-vercel-engine',ref:'UPDATE_RELEASE'};
+ const repo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim();
+ const ok=repo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha);
+ return {key:'source_identity',ok,message:ok?`Source identity is authoritative: ${repo}@${ref} (${sha.slice(0,8)}).`:`Expected ${expected.repo}@${expected.ref} with a full commit SHA.`};
 }
+async function validateUpdateBaseCompatibility(row:any){
+ if(row.release_type!=='update')return {key:'minimum_base',ok:true,message:'Base compatibility check is not required for Base releases.'};
+ const manifest=row.manifest&&typeof row.manifest==='object'?row.manifest:{};
+ const minimumVersion=String(manifest.minimumBaseVersion||'').trim();
+ const baseChannel=String(manifest.baseCompatibilityChannel||manifest.minimumBaseChannel||row.channel||'stable').trim().toLowerCase()||'stable';
+ if(!isOrbitReleaseVersion(minimumVersion))return {key:'minimum_base',ok:false,message:'Update minimumBaseVersion is missing or invalid.'};
+ const rows=(await db().query(`
+  select r.id,r.version,r.channel,r.status,r.review_status,r.manifest,r.published_at,r.created_at
+  from releases r join products p on p.id=r.product_id
+  where p.slug='orbitfs_base'
+    and r.release_type='base'
+    and r.channel=$1
+    and r.status='published'
+    and r.review_status='approved'
+    and r.archived_at is null
+  order by r.published_at desc nulls last,r.created_at desc`,[baseChannel])).rows;
+ const compatible=rows.filter((base:any)=>{
+   const comparison=compareOrbitReleaseVersions(String(base.version||''),minimumVersion);
+   return comparison!==null&&comparison>=0;
+ }).sort((a:any,b:any)=>compareOrbitReleaseVersions(String(b.version||''),String(a.version||''))??0);
+ const base=compatible[0];
+ if(!base){
+   const available=rows.map((candidate:any)=>String(candidate.version||'')).filter(Boolean);
+   return {key:'minimum_base',ok:false,message:`No published + approved Base at or above minimum ${minimumVersion} exists in channel ${baseChannel}.${available.length?` Available published Base versions: ${available.join(', ')}.`:''}`};
+ }
+ return {key:'minimum_base',ok:true,message:`Minimum Base ${minimumVersion} is satisfied by published Base ${base.version} in ${baseChannel}.`};
+}
+
+async function validateVersionProgression(row:any){
+ const version=String(row.version||'').trim();
+ if(!isOrbitReleaseVersion(version))return {key:'version_progression',ok:false,message:'Release version is invalid. Use a numeric OrbitFS version such as 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0.'};
+ const rollbackFrom=String(row?.manifest?.rollback_from?.release_id||'').trim();
+ if(row.release_type==='base'&&rollbackFrom){
+  const source=(await db().query(
+   "select id,version,release_type,review_status,status,checksum,source_sha,manifest from releases where id=$1 and product_id=$2 and channel=$3 limit 1",
+   [String(row?.manifest?.rollback_source_release_id||row?.manifest?.rollback_from?.source_release_id||''),row.product_id,row.channel]
+  )).rows[0];
+  const sourceValidated=Boolean(source&&source.release_type==='base'&&source.review_status==='approved'&&['superseded','published','disabled'].includes(String(source.status||''))&&source.manifest?.validation?.status==='passed'&&validationIdentityMatches(source));
+  return {key:'version_progression',ok:sourceValidated,message:sourceValidated?`Rollback candidate deliberately restores validated Base ${version}; monotonic version progression is not required.`:'Rollback candidate does not reference a validated historical Base artifact.'};
+ }
+ const family=orbitReleaseVersionFamily(version);
+ const published=(await db().query(`
+  select r.version
+  from releases r
+  where r.product_id=$1 and r.channel=$2 and r.release_type=$3
+    and r.status='published' and r.review_status='approved'
+    and r.archived_at is null and r.id<>$4
+  order by r.published_at desc nulls last,r.created_at desc`,[row.product_id,row.channel,row.release_type,row.id])).rows;
+ const previous=published.find((candidate:any)=>orbitReleaseVersionFamily(candidate.version)===family);
+ if(!previous)return {key:'version_progression',ok:true,message:`No previous published ${family||'OrbitFS'} ${row.release_type} version exists in ${row.channel}; ${version} starts that version line.`};
+ const cmp=compareOrbitReleaseVersions(version,previous.version);
+ const ok=cmp!==null&&cmp>0;
+ return {key:'version_progression',ok,message:ok?`Version ${version} advances beyond published ${previous.version}.`:`Version ${version} must advance beyond the latest published ${family||'OrbitFS'} ${row.release_type} version ${previous.version} in ${row.channel}.`};
+}
+export async function validateRelease(id:string, actorUserId?:string|null, actor?:string){const pool=db();const result=await pool.query(`select r.*,p.slug product,p.name product_name,p.status product_status from releases r join products p on p.id=r.product_id where r.id=$1 limit 1`,[id]);const row=result.rows[0];if(!row)return null;const checks:any[]=[];checks.push({key:'product',ok:row.product_status==='active',message:row.product_status==='active'?'Product is active.':'Product is not active.'});checks.push({key:'version',ok:isOrbitReleaseVersion(String(row.version||'').trim()),message:isOrbitReleaseVersion(String(row.version||'').trim())?'Version is a valid OrbitFS release version.':'Version must be a numeric OrbitFS release version (for example 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0).'});checks.push(await validateVersionProgression(row));const releaseNotes=String(row.notes||row.manifest?.releaseNotes||'').trim();checks.push({key:'changelog',ok:Boolean(releaseNotes),message:Boolean(releaseNotes)?'Generated release changelog is present.':'Release changelog is required before release approval.'});checks.push({key:'source',ok:Boolean(row.source_repo&&row.source_ref&&row.source_sha),message:Boolean(row.source_repo&&row.source_ref&&row.source_sha)?'Source repository, ref and commit are recorded.':'Source repository, ref and commit are required.'});checks.push(await validateSourceIdentity(row));checks.push(await validateUpdateBaseCompatibility(row));const components=canonicalComponents(row.manifest?.components,row.release_type);const componentsOk=row.release_type==='base'?components.length===1&&components[0]==='base':components.length>0&&components.every((x:string)=>ALLOWED_UPDATE_COMPONENTS.has(x));checks.push({key:'components',ok:componentsOk,message:componentsOk?`Release components: ${components.join(', ')}.`:'Release components are missing or invalid.'});const manifestObject=row.manifest&&typeof row.manifest==='object'?row.manifest:{};checks.push({key:'manifest',ok:Object.keys(manifestObject).length>0,message:Object.keys(manifestObject).length>0?'Release manifest is present.':'Release manifest is missing.'});const workflow=await checkWorkflow(row);checks.push(workflow);const artifact=await checkArtifact(row);checks.push(...artifact.checks);const enrichedChecks=enrichValidationChecks(checks);const passed=enrichedChecks.every((x:any)=>x.ok===true);const manifest=validationManifest({...row,manifest:{...(row.manifest||{}),...(artifact.manifestPatch||{}),components}},enrichedChecks,passed?'passed':'failed');const saved=(await pool.query(`update releases set manifest=$2 where id=$1 returning *`,[id,manifest])).rows[0];await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.validate','release',$3,$4)`,[actorUserId??null,actor??'integration-api',id,JSON.stringify({status:passed?'passed':'failed',checks:enrichedChecks})]);return saved;}
+export async function setReleaseReview(id:string,reviewStatus:'approved'|'rejected',actorUserId?:string|null,actor?:string,reason?:string){const pool=db();const row=(await pool.query(`select * from releases where id=$1`,[id])).rows[0];if(!row)return null;if(row.status==='published')throw new Error('Published releases are immutable; create a new revision for changes.');if(reviewStatus==='approved'&&(row.manifest?.validation?.status!=='passed'||!validationIdentityMatches(row)))throw new Error('Release must pass validation for this exact source/artifact before approval');const result=await pool.query(`update releases set review_status=$2,status=case when $2='rejected' then 'draft' when status='disabled' then 'draft' else status end where id=$1 returning *`,[id,reviewStatus]);if(!result.rows[0])return null;await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,$3,'release',$4,$5)`,[actorUserId??null,actor??'admin','release.review',id,JSON.stringify({review_status:reviewStatus,reason:reason||null})]);return result.rows[0];}
+export async function publishRelease(id:string,actorUserId?:string|null,actor?:string){
+ const pool=db();
+ const settings=(await pool.query('select system_enabled,release_system_enabled,deployment_enabled from system_settings where id=true')).rows[0];
+ if(!settings?.system_enabled||!settings.release_system_enabled||!settings.deployment_enabled)throw new Error('Release/deployment system is offline');
+ const client=await pool.connect();
+ try{
+  await client.query('BEGIN');
+  const row=(await client.query('select * from releases where id=$1 for update',[id])).rows[0];
+  if(!row){await client.query('ROLLBACK');return null;}
+  const channel=await requireReleaseChannel(row.channel);
+  if(!channel.customer_visible)throw new Error('Release channel is not customer-visible and cannot be published.');
+  if(row.status!=='draft'||row.archived_at)throw new Error('Only an active draft release can be published. Superseded, withdrawn and archived history is immutable.');
+  if(row.review_status!=='approved')throw new Error('Release must be approved before publication');
+  if(row.manifest?.validation?.status!=='passed'||!validationIdentityMatches(row))throw new Error('Release must pass validation for this exact source/artifact before publication');
+
+  let superseded:any[]=[];
+  let archivedHistory:any[]=[];
+  let immediatePrevious:any=null;
+
+  // Base publication exposes one current release and one previous rollback release.
+  // Normal Update publication is a separate system and is intentionally untouched here.
+  if(row.release_type==='base'){
+   await client.query('select pg_advisory_xact_lock(hashtext($1))',[String(row.product_id)+':'+String(row.channel)+':base']);
+   const currentlyPublished=(await client.query(
+    "select id,version,published_at from releases where product_id=$1 and channel=$2 and release_type='base' and status='published' and id<>$3 order by published_at desc nulls last,created_at desc for update",
+    [row.product_id,row.channel,id]
+   )).rows;
+   immediatePrevious=currentlyPublished[0]||null;
+
+   if(currentlyPublished.length){
+    superseded=(await client.query(
+     "update releases set status='superseded',archived_at=case when id=$2::uuid then null else coalesce(archived_at,now()) end,archived_by=case when id=$2::uuid then null else coalesce(archived_by,$3::uuid) end where id = any($1::uuid[]) returning id,version,published_at,archived_at",
+     [currentlyPublished.map((item:any)=>item.id),immediatePrevious?.id??null,actorUserId??null]
+    )).rows;
+   }
+
+   archivedHistory=(await client.query(
+    "update releases set archived_at=coalesce(archived_at,now()),archived_by=coalesce(archived_by,$3::uuid) where product_id=$1 and channel=$2 and release_type='base' and status='superseded' and archived_at is null and ($4::uuid is null or id<>$4::uuid) returning id,version,published_at,archived_at",
+    [row.product_id,row.channel,actorUserId??null,immediatePrevious?.id??null]
+   )).rows;
+  }
+
+  const result=await client.query(
+   "update releases set status='published',review_status='approved',published_at=now(),deployment_status='queued',supersedes_release_id=coalesce(supersedes_release_id,$2::uuid) where id=$1 and review_status='approved' returning *",
+   [id,immediatePrevious?.id??null]
+  );
+  const published=result.rows[0];
+  if(!published){await client.query('ROLLBACK');return null;}
+
+  for(const previous of superseded){
+   await client.query(
+    "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.superseded','release',$3,$4)",
+    [actorUserId??null,actor??'admin',previous.id,JSON.stringify({superseded_by:id,version:previous.version,channel:row.channel,release_type:'base',archived:Boolean(previous.archived_at),rollback_slot:String(previous.id)===String(immediatePrevious?.id||'')})]
+   );
+  }
+  for(const historical of archivedHistory){
+   await client.query(
+    "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.history.hidden','release',$3,$4)",
+    [actorUserId??null,actor??'admin',historical.id,JSON.stringify({new_current_release_id:id,version:historical.version,channel:row.channel,release_type:'base',preserve_audit_history:true})]
+   );
+  }
+  await client.query(
+   "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.publish','release',$3,$4)",
+   [actorUserId??null,actor??'admin',id,JSON.stringify({deployment_status:'queued',previous_release_id:immediatePrevious?.id??null,superseded_release_ids:superseded.map((x:any)=>x.id),hidden_history_ids:archivedHistory.map((x:any)=>x.id)})]
+  );
+  await client.query('COMMIT');
+  return published;
+ }catch(error){
+  try{await client.query('ROLLBACK')}catch{}
+  throw error;
+ }finally{client.release();}
+}
+export async function promoteRelease(id:string,targetChannel:string,actorUserId?:string|null,actor?:string){
+ const pool=db();
+ const source=(await pool.query(`select r.*,p.slug product from releases r join products p on p.id=r.product_id where r.id=$1 limit 1`,[id])).rows[0];
+ if(!source) return null;
+ if(source.review_status!=='approved'||source.manifest?.validation?.status!=='passed') throw new Error('Only a technically approved and validated release can be promoted.');
+ const channel=await requireReleaseChannel(targetChannel);
+ if(channel.channel===source.channel) throw new Error('Target channel is the same as the source channel.');
+ if(!channel.customer_visible)throw new Error('Target release channel is not customer-visible.');
+ if(source.release_type==='update'){
+  const compatibility=await validateUpdateBaseCompatibility({...source,channel:channel.channel});
+  if(!compatibility.ok)throw new Error(compatibility.message);
+ }
+ const progression=await validateVersionProgression({...source,channel:channel.channel,id:'00000000-0000-0000-0000-000000000000'});
+ if(!progression.ok)throw new Error(progression.message);
+ const existing=(await pool.query(`select * from releases where product_id=$1 and channel=$2 and version=$3 and release_type=$4 and artifact_url=$5 and checksum=$6 and source_sha=$7 order by revision desc limit 1`,[source.product_id,channel.channel,source.version,source.release_type,source.artifact_url,source.checksum,source.source_sha])).rows[0];
+ if(existing) return existing;
+ const revision=Number((await pool.query(`select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=$4`,[source.product_id,channel.channel,source.version,source.release_type])).rows[0].revision||0)+1;
+ const manifest={...(source.manifest||{}),promoted_from:{release_id:source.id,channel:source.channel,promoted_at:new Date().toISOString()}};
+ // Promotion is not a new technical candidate. The source has already passed License
+ // Master validation/approval, so the promoted release preserves that approval and
+ // validation state. Publication remains a separate customer-facing action.
+ const result=await pool.query(`insert into releases(product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'approved',$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) returning *`,
+ [source.product_id,channel.channel,source.version,source.release_type,source.source_repo,source.source_ref,source.artifact_url,source.checksum,source.notes,
+  'draft',null,'not_started',
+  source.source_sha,source.artifact_name,source.artifact_repo,source.artifact_run_id,source.vercel_ready,source.supabase_ready,source.customer_publication_repo,manifest,revision,source.id]);
+ const row=result.rows[0];
+ await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.promote','release',$3,$4)`,[actorUserId??null,actor??'admin',row.id,JSON.stringify({from_release_id:source.id,from_channel:source.channel,to_channel:channel.channel,version:row.version,approval_preserved:true,publication_required:true})]);
+ return row;
+}
+
+export async function createPresentationRevision(id:string,input:any,actorUserId?:string|null,actor?:string){
+ const pool=db();
+ const source=(await pool.query('select * from releases where id=$1 limit 1',[id])).rows[0];
+ if(!source)return null;
+ if(source.status!=='published')throw new Error('Only a published release can create a presentation revision.');
+ const revision=Number((await pool.query('select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=$4',[source.product_id,source.channel,source.version,source.release_type])).rows[0].revision||0)+1;
+ const manifest={...(source.manifest||{})};
+ for(const [key,value] of Object.entries(input||{})){if(['title','description','customer_notes','internal_notes','severity','required','rollout','minimum_version','rollback_version'].includes(key))manifest[key]=value;}
+ if(input?.changelog!==undefined)manifest.customer_changelog=String(input.changelog||'');
+ const result=await pool.query(`insert into releases(product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'draft',null,'approved',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) returning *`,
+ [source.product_id,source.channel,source.version,source.release_type,source.source_repo,source.source_ref,source.artifact_url,source.checksum,source.notes,source.deployment_status||'not_started',source.source_sha,source.artifact_name,source.artifact_repo,source.artifact_run_id,source.vercel_ready,source.supabase_ready,source.customer_publication_repo,manifest,revision,source.id]);
+ const row=result.rows[0];
+ await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.presentation.revision','release',$3,$4)`,[actorUserId??null,actor??'admin',row.id,JSON.stringify({supersedes_release_id:source.id,version:row.version,revision})]);
+ return row;
+}
+
+export async function withdrawRelease(id:string,actorUserId?:string|null,actor?:string){
+ const pool=db();
+ const row=(await pool.query('select * from releases where id=$1 limit 1',[id])).rows[0];
+ if(!row)return null;
+ if(row.status!=='published')throw new Error('Only a published release can be withdrawn.');
+ const result=await pool.query("update releases set status='withdrawn' where id=$1 and status='published' returning *",[id]);
+ if(!result.rows[0])throw new Error('Release could not be withdrawn.');
+ await pool.query("insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.withdraw','release',$3,$4)",[actorUserId??null,actor??'admin',id,JSON.stringify({version:row.version,channel:row.channel,release_type:row.release_type})]);
+ return result.rows[0];
+}
+
+export async function rollbackBaseRelease(id:string,actorUserId?:string|null,actor?:string){
+ const pool=db();
+ const current=(await pool.query('select r.*,p.slug product from releases r join products p on p.id=r.product_id where r.id=$1 limit 1',[id])).rows[0];
+ if(!current)return null;
+ if(current.release_type!=='base')throw new Error('Rollback is currently available for Base deployments only.');
+ if(current.status!=='published')throw new Error('Only a published Base deployment can be rolled back.');
+ const previous=(await pool.query(
+  "select r.*,p.slug product from releases r join products p on p.id=r.product_id where r.product_id=$1 and r.channel=$2 and r.release_type='base' and r.status in ('superseded','published','disabled') and r.review_status='approved' and r.id<>$3 and r.published_at < $4 order by r.published_at desc nulls last,r.created_at desc limit 1",
+  [current.product_id,current.channel,id,current.published_at]
+ )).rows[0];
+ if(!previous||previous.manifest?.validation?.status!=='passed'||!validationIdentityMatches(previous))throw new Error('No previous validated Base deployment is available for rollback.');
+ const revision=Number((await pool.query('select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=\'base\'',[previous.product_id,previous.channel,previous.version])).rows[0].revision||0)+1;
+ const manifest={...(previous.manifest||{}),rollback_from:{release_id:current.id,version:current.version,source_release_id:previous.id,created_at:new Date().toISOString()},rollback_source_release_id:previous.id};
+ const result=await pool.query("insert into releases(product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id) values($1,$2,$3,'base',$4,$5,$6,$7,$8,'draft',null,'pending','not_started',$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning *",[previous.product_id,previous.channel,previous.version,previous.source_repo,previous.source_ref,previous.artifact_url,previous.checksum,previous.notes,previous.source_sha,previous.artifact_name,previous.artifact_repo,previous.artifact_run_id,previous.vercel_ready,previous.supabase_ready,previous.customer_publication_repo,manifest,revision,current.id]);
+ const row=result.rows[0];
+ await pool.query("insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.rollback.prepare','release',$3,$4)",[actorUserId??null,actor??'admin',row.id,JSON.stringify({from_release_id:current.id,from_version:current.version,to_version:row.version,source_release_id:previous.id})]);
+ return validateRelease(row.id,actorUserId??null,actor??'admin');
+}
+
+export async function archiveRelease(id:string, archived:boolean, actorUserId?:string|null, actor?:string, reason?:string){const pool=db();const row=(await pool.query(`select * from releases where id=$1`,[id])).rows[0];if(!row)return null;if(archived&&row.status==='published')throw new Error('Published releases must be withdrawn before they can be archived.');if(!archived&&row.status==='published')throw new Error('Published releases cannot be restored into the active deployment queue.');const now=new Date();const manifest={...(row.manifest||{})};if(archived)manifest.archive={...(manifest.archive||{}),reason:String(reason||'Archived from Dev Panel').trim(),archived_at:now.toISOString(),actor:actor??'admin'};else delete manifest.archive;const result=await pool.query(`update releases set archived_at=$2,archived_by=$3,manifest=$4 where id=$1 returning *`,[id,archived?now:null,archived?actorUserId??null:null,manifest]);await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,$3,'release',$4,$5)`,[actorUserId??null,actor??'admin',archived?'release.archive':'release.restore',id,JSON.stringify({archived,reason:archived?String(reason||'Archived from Dev Panel').trim():null})]);return result.rows[0]??null;}
+
+export async function markReleaseRolledBack(id:string,reason:string,actorUserId?:string|null,actor?:string,kind:'rollback'|'revert'='rollback'){
+ const pool=db();const row=(await pool.query('select * from releases where id=$1 limit 1',[id])).rows[0];if(!row)return null;
+ const why=String(reason||'').trim();if(!why)throw new Error('Rollback/revert reason is required.');
+ const now=new Date();const manifest={...(row.manifest||{}),lifecycle:{...(row.manifest?.lifecycle||{}),state:kind==='revert'?'reverted':'rolled_back',reason:why,at:now.toISOString(),actor:actor??'dev-panel'}};
+ if(row.status==='published')await pool.query("update releases set status='withdrawn' where id=$1 and status='published'",[id]);
+ const result=(await pool.query("update releases set status='withdrawn',archived_at=$2,archived_by=$3,manifest=$4 where id=$1 returning *",[id,now,actorUserId??null,manifest])).rows[0];
+ await pool.query("insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,$3,'release',$4,$5)",[actorUserId??null,actor??'dev-panel',kind==='revert'?'release.reverted':'release.rolled_back',id,JSON.stringify({version:row.version,release_type:row.release_type,previous_status:row.status,reason:why})]);
+ return result??null;
+}
+export async function updateReleasePresentation(id:string,input:any,actorUserId?:string|null,actor?:string){const pool=db();const row=(await pool.query(`select * from releases where id=$1`,[id])).rows[0];if(!row)return null;if(row.status==='published')throw new Error('Published releases are immutable; create a new revision for changes.');const oldManifest=row.manifest||{};const nextManifest={...oldManifest};for(const [key,value] of Object.entries(input||{})){if(['title','description','customer_notes','internal_notes','severity','required','rollout','minimum_version','rollback_version'].includes(key))nextManifest[key]=value;}if(input?.changelog!==undefined)nextManifest.customer_changelog=String(input.changelog||'');const result=await pool.query(`update releases set manifest=$2 where id=$1 returning *`,[id,nextManifest]);await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'release.presentation.update','release',$3,$4)`,[actorUserId??null,actor??'admin',id,JSON.stringify({fields:Object.keys(input||{}),technical_validation_preserved:true})]);return result.rows[0]??null;}

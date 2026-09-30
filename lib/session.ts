@@ -4,12 +4,14 @@ import { redirect } from 'next/navigation';
 import { db } from './db';
 
 const COOKIE = 'lm_session';
+const DAYS = 7;
+
 function hashToken(token: string) { return crypto.createHash('sha256').update(token).digest('hex'); }
 
 export async function createSession(userId: string) {
   const token = crypto.randomBytes(32).toString('base64url');
   await db().query(`insert into user_sessions(user_id, token_hash, expires_at) values($1,$2,now()+interval '7 days')`, [userId, hashToken(token)]);
-  (await cookies()).set(COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 7 * 86400 });
+  (await cookies()).set(COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: DAYS * 86400 });
 }
 
 export async function getSessionUser() {
