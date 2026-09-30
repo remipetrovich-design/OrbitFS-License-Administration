@@ -1,3 +1,6 @@
+-- Forward-only repair for legacy metadata that did not already contain
+-- a license_policy object. The earlier migration remains immutable.
+
 update public.licenses
 set metadata = jsonb_set(
   coalesce(metadata,'{}'::jsonb),
