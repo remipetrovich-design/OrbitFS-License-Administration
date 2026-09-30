@@ -24,9 +24,18 @@ export default async function SetupPage() {
  const count=(await db().query('select count(*)::int count from users')).rows[0].count;
  if(count>0)redirect('/login');
  return <main className="auth-shell">
+  <section className="auth-brand-panel">
+   <div className="auth-brand-mark">LM</div>
+   <div><div className="eyebrow">First-time bootstrap</div><h1>License Manager</h1><p>Establish the first local Owner identity before the technical authority plane becomes administratively accessible.</p></div>
+   <div className="auth-status-list">
+    <div><span className="status-light warning"/><div><strong>Owner required</strong><small>No administrative identity exists yet.</small></div></div>
+    <div><span className="status-light online"/><div><strong>Private control plane</strong><small>No public registration route is exposed.</small></div></div>
+    <div><span className="status-light online"/><div><strong>Audited bootstrap</strong><small>The first Owner creation is written to audit history.</small></div></div>
+   </div>
+  </section>
   <section className="auth-form-panel">
    <div className="auth-form-card">
-    <div className="eyebrow">Owner bootstrap</div><h2>Create first Owner</h2>
+    <div className="eyebrow">Owner bootstrap</div><h2>Create first Owner</h2><p className="muted">This account belongs to this License Manager only.</p>
     <form className="form" action={setup}><label>Name<input className="input" name="name" required autoComplete="name"/></label><label>Email<input className="input" name="email" type="email" required autoComplete="email"/></label><label>Password<input className="input" name="password" type="password" minLength={12} required autoComplete="new-password"/></label><button className="button" type="submit">Create Owner account</button></form>
    </div>
   </section>
