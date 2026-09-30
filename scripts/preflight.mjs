@@ -12,6 +12,8 @@ const run = (label, command, args) => {
 
 if (!existsSync("package-lock.json")) {
   console.error("PRODUCTION PREFLIGHT BLOCKED: package-lock.json is missing.");
+  console.error("Create it with: npm install --package-lock-only");
+  console.error("Then commit package-lock.json before attempting production deployment.");
   process.exit(1);
 }
 
@@ -23,6 +25,7 @@ if (!existsSync("vercel.json")) {
 const vercelConfig = JSON.parse(readFileSync("vercel.json", "utf8"));
 if (vercelConfig?.git?.deploymentEnabled !== false) {
   console.error("PRODUCTION PREFLIGHT BLOCKED: automatic Vercel Git deployments are not disabled.");
+  console.error('Expected vercel.json to contain: "git": { "deploymentEnabled": false }');
   process.exit(1);
 }
 
