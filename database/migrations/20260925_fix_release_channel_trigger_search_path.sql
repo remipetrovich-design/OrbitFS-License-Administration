@@ -1,3 +1,5 @@
+-- Migration automation probe plus security hardening.
+-- The mapped License Manager project must already contain this trigger function.
 do $$
 begin
   if to_regprocedure('public.touch_release_channel_access_updated_at()') is null then
