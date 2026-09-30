@@ -19,13 +19,43 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout complete repository history
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+
+      - name: Use Node 22
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: node scripts/prepare-supabase-migrations.mjs .orbitfs-supabase/supabase/migrations
-      - run: npm run preflight
+
+      - name: Verify immutable database migration baseline
+        run: node scripts/prepare-supabase-migrations.mjs .orbitfs-supabase/supabase/migrations
+
+      - name: Initialize CodeQL full security scan
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Run CodeQL full security scan
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript-full-scan"
+
+      - name: Run complete production validation
+        run: npm run preflight
+
+      - name: Upload temporary validation failure report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-failure-${{ github.sha }}
+          path: .orbitfs-validation/validation-error.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Full scan passed
+        run: echo "Full production scan passed for immutable commit $GITHUB_SHA."

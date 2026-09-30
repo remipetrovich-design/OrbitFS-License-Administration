@@ -1,0 +1,100 @@
+name: ChatGPT Deployment Override
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: chatgpt-deployment-override
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: ${{ github.actor == 'lucaskerim123' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read one-shot deployment request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('.github/chatgpt-deploy-request.json').read_text())
+          target = data.get('target')
+          request_id = data.get('request_id')
+          if target not in {'none', 'lm', 'v2', 'both'}:
+              raise SystemExit(f'Invalid deployment target: {target!r}')
+          if not request_id:
+              raise SystemExit('Missing deployment request_id')
+          Path('/tmp/request.env').write_text(f'TARGET={target}\\nREQUEST_ID={request_id}\\n')
+          PY
+          cat /tmp/request.env >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch V2 Billing Store production deployment
+        if: steps.request.outputs.TARGET == 'v2' || steps.request.outputs.TARGET == 'both'
+        env:
+          GITHUB_ACTIONS_TOKEN: ${{ secrets.GITHUB_ACTIONS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITHUB_ACTIONS_TOKEN"
+          curl --fail-with-body -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_ACTIONS_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/lucaskerim123/V2_Billing_Store/actions/workflows/production-deploy.yml/dispatches \
+            -d '{"ref":"main"}'
+
+      - name: Dispatch License Manager production deployment
+        if: steps.request.outputs.TARGET == 'lm' || steps.request.outputs.TARGET == 'both'
+        env:
+          GITHUB_ACTIONS_TOKEN: ${{ secrets.GITHUB_ACTIONS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GITHUB_ACTIONS_TOKEN"
+          curl --fail-with-body -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_ACTIONS_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/lucaskerim123/Custom-licence-manager/actions/workflows/production-deploy.yml/dispatches \
+            -d '{"ref":"main"}'
+
+      - name: Record one-shot request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ steps.request.outputs.TARGET }}
+          REQUEST_ID: ${{ steps.request.outputs.REQUEST_ID }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "none" ]; then
+            STATUS="idle"
+          else
+            STATUS="dispatched"
+          fi
+          export STATUS
+          python - <<'PY' > /tmp/status.json
+          import json, os, datetime
+          print(json.dumps({
+            "status": os.environ["STATUS"],
+            "target": os.environ["TARGET"],
+            "request_id": os.environ["REQUEST_ID"],
+            "source_commit": os.environ["GITHUB_SHA"],
+            "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+          }, indent=2) + "\\n")
+          PY
+          if gh api repos/lucaskerim123/Custom-licence-manager/contents/.github/chatgpt-deploy-status.json --silent >/dev/null 2>&1; then
+            sha=$(gh api repos/lucaskerim123/Custom-licence-manager/contents/.github/chatgpt-deploy-status.json --jq '.sha')
+            gh api --method PUT repos/lucaskerim123/Custom-licence-manager/contents/.github/chatgpt-deploy-status.json \
+              -f message="Record ChatGPT deployment request $REQUEST_ID" \
+              -f content="$(base64 -w0 /tmp/status.json)" \
+              -f sha="$sha" >/dev/null
+          else
+            gh api --method PUT repos/lucaskerim123/Custom-licence-manager/contents/.github/chatgpt-deploy-status.json \
+              -f message="Record ChatGPT deployment request $REQUEST_ID" \
+              -f content="$(base64 -w0 /tmp/status.json)" >/dev/null
+          fi
+          echo "OVERRIDE DEPLOY request=$REQUEST_ID target=$TARGET status=$STATUS commit=$GITHUB_SHA"
