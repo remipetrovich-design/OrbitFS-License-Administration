@@ -1,0 +1,87 @@
+name: Supabase Migrations
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'database/migrations/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: license-manager-supabase-production
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_PROJECT_ID: hwlrgogwnbjceevweqvv
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - name: Checkout complete migration history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Use Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Prepare immutable migration set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .orbitfs-supabase
+          (cd .orbitfs-supabase && supabase init)
+          node scripts/prepare-supabase-migrations.mjs .orbitfs-supabase/supabase/migrations
+      - name: Reject edits to existing migration history
+        if: ${{ github.event_name == 'push' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          before="${{ github.event.before }}"
+          if [ "$before" = "0000000000000000000000000000000000000000" ]; then exit 0; fi
+          changes="$(git diff --name-status "$before" "$GITHUB_SHA" -- 'database/migrations/*.sql' || true)"
+          echo "$changes"
+          if echo "$changes" | awk '$1 ~ /^(M|D|R)/ {bad=1} END {exit bad?0:1}'; then
+            echo "::error::Existing migration files are immutable. Add a new migration instead."
+            exit 1
+          fi
+      - name: Detect pending migrations
+        id: pending
+        shell: bash
+        run: |
+          count="$(node -e "const r=require('./.orbitfs-supabase/report.json');process.stdout.write(String(r.pending_count||0))")"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Pending migrations: $count"
+      - name: Verify exact production credentials
+        if: ${{ steps.pending.outputs.count != '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::Missing SUPABASE_ACCESS_TOKEN repository secret"; exit 1; }
+          test -n "$SUPABASE_DB_PASSWORD" || { echo "::error::Missing SUPABASE_DB_PASSWORD repository secret"; exit 1; }
+          test "$SUPABASE_PROJECT_ID" = "hwlrgogwnbjceevweqvv"
+      - name: Link exact production database
+        if: ${{ steps.pending.outputs.count != '0' }}
+        working-directory: .orbitfs-supabase
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+      - name: Preview migration
+        if: ${{ steps.pending.outputs.count != '0' }}
+        working-directory: .orbitfs-supabase
+        run: supabase db push --dry-run
+      - name: Apply pending migrations
+        if: ${{ steps.pending.outputs.count != '0' }}
+        working-directory: .orbitfs-supabase
+        run: supabase db push
+      - name: Verify migration history
+        if: ${{ steps.pending.outputs.count != '0' }}
+        working-directory: .orbitfs-supabase
+        run: supabase migration list
+      - name: No database changes required
+        if: ${{ steps.pending.outputs.count == '0' }}
+        run: echo "No pending database migrations."
