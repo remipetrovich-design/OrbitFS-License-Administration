@@ -5,6 +5,7 @@ import { listReleaseChannels, saveReleaseChannel } from '../../../../lib/core/re
 export async function GET(request: Request) {
   const auth = await integrationAuthorized(request, 'releases.read');
   if (!auth) return NextResponse.json({ error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' }, { status: 401 });
+
   return NextResponse.json({
     channels: await listReleaseChannels(request.url.includes('include_disabled=true')),
   });
@@ -13,7 +14,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await integrationAuthorized(request, 'releases.write');
   if (!auth) return NextResponse.json({ error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' }, { status: 401 });
+
   const body = await request.json().catch(() => ({}));
+
   try {
     return NextResponse.json({
       channel: await saveReleaseChannel({
