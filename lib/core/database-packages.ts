@@ -11,12 +11,12 @@ const FORBIDDEN_INTERNAL_SQL=/\b(?:billing_[a-z0-9_]*|license_manager_[a-z0-9_]*
 const DESTRUCTIVE_SQL=/\b(?:drop\s+table|drop\s+schema|truncate\s+(?:table\s+)?|alter\s+table[\s\S]{0,300}?drop\s+column)\b/i;
 const TRANSACTION_SQL=/\b(?:begin|commit|rollback)\s*;/i;
 
-const SOURCE_REPO:Record<CustomerDatabaseComponent,string>={
-  base:'lucaskerim123/V1-vercel-base',
-  'engine-shared':'lucaskerim123/V1-vercel-engine',
-  mcp:'lucaskerim123/V1-vercel-engine',
-  apex:'lucaskerim123/V1-vercel-engine',
-  studio:'lucaskerim123/V1-vercel-engine'
+const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
+  base:['lucaskerim123/V1-vercel-base','remipetrovich-design/OrbitFS-Base-System'],
+  'engine-shared':['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
+  mcp:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
+  apex:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
+  studio:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine']
 };
 
 const MIGRATION_PATHS:Record<CustomerDatabaseComponent,RegExp>={
@@ -49,7 +49,7 @@ export function validateDatabasePackage(input:any){
   if(String(input.databaseTarget||'').trim().toLowerCase()!=='customer')throw new Error('DATABASE_PACKAGE_TARGET_INVALID');
 
   const sourceRepo=String(input.sourceRepo||'').trim();
-  if(sourceRepo!==SOURCE_REPO[selected])throw new Error('DATABASE_PACKAGE_SOURCE_REPO_INVALID');
+  if(!SOURCE_REPOS[selected].includes(sourceRepo))throw new Error('DATABASE_PACKAGE_SOURCE_REPO_INVALID');
 
   const sourceCommit=String(input.sourceCommit||'').trim().toLowerCase();
   if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error('DATABASE_PACKAGE_SOURCE_COMMIT_INVALID');
@@ -300,8 +300,8 @@ export async function validateReleaseDatabasePackages(row:any){
     if(String(stored.source_commit||'').toLowerCase()!==releaseCommit||ref.sourceCommit!==releaseCommit)return {ok:false,message:'Database package source commit does not match the release: '+ref.component};
     if(Number(stored.database_schema_version)!==ref.databaseSchemaVersion)return {ok:false,message:'Database package schema version reference mismatch: '+ref.component};
     if(String(stored.package_sha256||'').toLowerCase()!==ref.sha256||!/^[a-f0-9]{64}$/.test(ref.sha256))return {ok:false,message:'Database package checksum reference mismatch: '+ref.component};
-    if(String(row?.release_type||'')==='base'&&String(stored.source_repo)!=='lucaskerim123/V1-vercel-base')return {ok:false,message:'Base database package has an invalid source repository.'};
-    if(String(row?.release_type||'')==='update'&&String(stored.source_repo)!=='lucaskerim123/V1-vercel-engine')return {ok:false,message:'Engine database package has an invalid source repository.'};
+    const releaseSourceRepo=String(row?.source_repo||'').trim();
+    if(String(stored.source_repo||'')!==releaseSourceRepo)return {ok:false,message:'Database package source repository does not match the release source repository: '+ref.component};
   }
   return {ok:true,message:`Database package set is complete and source-locked: ${required.join(', ')}.`,packages:refs};
 }
