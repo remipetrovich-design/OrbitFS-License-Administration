@@ -33,6 +33,7 @@ const LOCAL_BASE_REF='base-release';
 const LOCAL_ENGINE_REPO='remipetrovich-design/OrbitFS_Engine';
 const LOCAL_ENGINE_REF='UPDATE_RELEASES';
 const LOCAL_SOURCE_REPOS=[LOCAL_BASE_REPO,LOCAL_ENGINE_REPO] as const;
+const LOCAL_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Control-Centre';
 const LOCAL_GITHUB_TOKEN_ENV='ORBITFS_FALLBACK_GITHUB_TOKEN';
 function expectedReleaseSource(releaseType:unknown){
  return String(releaseType||'').toLowerCase()==='base'
@@ -645,10 +646,10 @@ export async function createRelease(input:{productId:string;channel:string;versi
 }
 async function validateSourceIdentity(row:any){
  const expected=expectedReleaseSource(row.release_type);
- const expectedArtifactRepo=expectedReleaseArtifactRepo(row.release_type);
+ const expectedArtifactRepo=String(row.release_type||'').toLowerCase()==='base'?LOCAL_BASE_ARTIFACT_REPO:expected.repo;
  const sourceRepo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim(),artifactRepo=String(row.artifact_repo||'').trim();
  const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===expectedArtifactRepo;
- return {key:'source_identity',ok,message:ok?`Source and artifact identity are authoritative and system-local: ${sourceRepo}@${ref} → ${artifactRepo} (${sha.slice(0,8)}).`:`Expected ${expected.repo}@${expected.ref}, artifact_repo ${expectedArtifactRepo}, and a full commit SHA.`};
+ return {key:'source_identity',ok,message:ok?`Source identity is authoritative and system-local: ${sourceRepo}@${ref}; artifact ${artifactRepo} (${sha.slice(0,8)}).`:`Expected source ${expected.repo}@${expected.ref} and artifact repository ${expectedArtifactRepo}, with a full commit SHA.`};
 }
 async function validateUpdateBaseCompatibility(row:any){
  if(row.release_type!=='update')return {key:'minimum_base',ok:true,message:'Base compatibility check is not required for Base releases.'};
