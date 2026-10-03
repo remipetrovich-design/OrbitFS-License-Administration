@@ -26,14 +26,21 @@ export async function POST(request:Request){
     const releaseType=String(body.release_type||body.releaseType||'update').trim().toLowerCase();
     if(!['base','update'].includes(releaseType))return NextResponse.json({error:'INVALID_RELEASE_TYPE'},{status:400});
     const sourceRepo=String(body.source_repo??body.sourceRepo??'').trim();
+    const sourceRef=String(body.source_ref??body.sourceRef??'').trim();
+    const expectedSource=releaseType==='base'
+      ? {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'}
+      : {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASES'};
+    if(sourceRepo!==expectedSource.repo||sourceRef!==expectedSource.ref)return NextResponse.json({error:'SOURCE_SYSTEM_MISMATCH',expected_repo:expectedSource.repo,expected_ref:expectedSource.ref},{status:400});
+    const requestedPublicationRepo=String(body.customer_publication_repo??body.customerPublicationRepo??'').trim();
     const defaultCustomerPublicationRepo='remipetrovich-design/OrbitFS-Billing-Shopfront';
+    if(requestedPublicationRepo&&requestedPublicationRepo!==defaultCustomerPublicationRepo)return NextResponse.json({error:'PUBLICATION_SYSTEM_MISMATCH',expected_repo:defaultCustomerPublicationRepo},{status:400});
     const row=await createRelease({
       productId:product.id,channel:String(body.channel||'stable').trim().toLowerCase(),version:String(body.version||'').trim(),releaseType:releaseType as 'base'|'update',
-      sourceRepo:sourceRepo||null,sourceRef:body.source_ref??body.sourceRef??null,sourceSha:body.source_sha??body.sourceCommit??null,
+      sourceRepo,sourceRef,sourceSha:body.source_sha??body.sourceCommit??null,
       artifactUrl:body.artifact_url??body.artifactUrl??null,artifactName:body.artifact_name??body.artifactName??null,artifactRepo:body.artifact_repo??body.artifactRepo??null,
       artifactRunId:body.artifact_run_id??body.artifactRunId??null,checksum:body.checksum??body.sha256??null,notes:body.changelog??body.notes??null,
       vercelReady:Boolean(body.vercel_ready??body.vercelReady),supabaseReady:Boolean(body.supabase_ready??body.supabaseReady),
-      customerPublicationRepo:body.customer_publication_repo??body.customerPublicationRepo??defaultCustomerPublicationRepo,
+      customerPublicationRepo:defaultCustomerPublicationRepo,
       manifest:body.manifest&&typeof body.manifest==='object'?body.manifest:{},reviewStatus:'pending',deploymentStatus:'not_started',actor:`api:${auth.name}`
     });
     return NextResponse.json({ok:true,release:row,release_id:row.id});
