@@ -354,3 +354,17 @@ details[open]>.managed-record-summary .collapse-chevron{transform:rotate(180deg)
 .component-editor legend{padding:0 6px;color:var(--muted);font-size:12px}
 .component-editor label{display:flex;align-items:center;gap:8px;color:var(--text)}
 @media (max-width:760px){.license-inline-editor{min-width:0}.component-editor{grid-template-columns:1fr}}
+
+
+/* Persistent GitHub source indicator. The Dev Panel profile is the only authority. */
+.runtime-source-badge{position:fixed;right:14px;bottom:14px;z-index:2000;display:grid;gap:2px;min-width:220px;max-width:min(360px,calc(100vw - 28px));padding:10px 12px;border:1px solid #d7dce7;border-radius:10px;background:rgba(255,255,255,.96);box-shadow:0 10px 28px rgba(17,24,39,.13);backdrop-filter:blur(10px);font-size:9px;color:#667085}
+.runtime-source-badge>span{text-transform:uppercase;letter-spacing:.09em;font-weight:800;color:#8995a9}
+.runtime-source-badge>strong{font-size:11px;color:#111827}
+.runtime-source-badge>small{font-size:8.5px;line-height:1.35;overflow-wrap:anywhere}
+.runtime-source-fallback{border-color:#f0c96b;background:rgba(255,250,235,.97)}
+.runtime-source-fallback>strong{color:#9a6200}
+.runtime-source-primary{border-color:#cfd4ff}
+.runtime-source-primary>strong{color:#4e50ce}
+.runtime-source-unknown{border-color:#efc4c8;background:rgba(255,247,247,.97)}
+.runtime-source-unknown>strong{color:#b4232e}
+@media(max-width:700px){.runtime-source-badge{right:10px;bottom:10px;min-width:0;width:calc(100vw - 20px)}}
