@@ -79,6 +79,14 @@ export async function saveOfficialApiConnection(input:{
    [valid.service,label,valid.baseUrl,valid.allowedClients,input.enabled!==false,priority,JSON.stringify(settings)],
   )).rows[0];
  }
+ if(row?.enabled){
+  await db().query(
+   `update official_api_connections
+       set enabled=false,updated_at=now()
+     where service_key=$1 and id<>$2 and enabled=true`,
+   [row.service_key,row.id],
+  );
+ }
  try{
   await db().query(
    `insert into audit_events(actor_user_id,actor,event_type,resource_type,resource_id,details)
