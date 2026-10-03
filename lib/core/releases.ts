@@ -558,7 +558,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
   const activeCandidate=existing.status==='draft'&&!existing.published_at&&(!existing.archived_at||returnedCandidate);
   if(activeCandidate){
    const attemptHistory=Array.isArray(existing.manifest?.build_attempts)?existing.manifest.build_attempts:[];
-   const attemptNumber=Math.max(Number(existing.manifest?.latest_attempt||0),...attemptHistory.map((item:any)=>Number(item?.attempt||0)),0)+1;
+   const attemptNumber=Math.max(Number(existing.revision||0),Number(existing.manifest?.latest_attempt||0),...attemptHistory.map((item:any)=>Number(item?.attempt||0)),0)+1;
    const buildAttempt={
     attempt:attemptNumber,
     artifact_run_id:input.artifactRunId??null,
@@ -597,7 +597,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
   )).rows[0].revision||0)+1;
   const receivedAt=new Date().toISOString();
   const previousAttempts=Array.isArray(existing.manifest?.build_attempts)?existing.manifest.build_attempts:[];
-  const attemptNumber=Math.max(Number(existing.manifest?.latest_attempt||0),...previousAttempts.map((item:any)=>Number(item?.attempt||0)),0)+1;
+  const attemptNumber=Math.max(Number(existing.revision||0),Number(existing.manifest?.latest_attempt||0),...previousAttempts.map((item:any)=>Number(item?.attempt||0)),0)+1;
   const manifest={
    ...(existing.manifest||{}),
    ...incomingManifest,
@@ -726,7 +726,7 @@ async function validateVersionProgression(row:any){
   );
   if(sourceValidated){
    const attempts=Array.isArray(row?.manifest?.build_attempts)?row.manifest.build_attempts:[];
-   const attempt=Math.max(Number(row?.manifest?.latest_attempt||0),...attempts.map((item:any)=>Number(item?.attempt||0)),1);
+   const attempt=Math.max(Number(row?.revision||1),Number(row?.manifest?.latest_attempt||0),...attempts.map((item:any)=>Number(item?.attempt||0)),1);
    return {key:'version_progression',ok:true,message:`Version ${version} remains the customer version. Attempt ${attempt} / package r${Number(row.revision||0)} is a valid same-version repackage of published r${Number(source.revision||0)}; customers adopt it only when this revision is approved and published.`};
   }
  }
