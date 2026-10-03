@@ -568,6 +568,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
     received_at:new Date().toISOString()
    };
    const manifest={...(existing.manifest||{}),...incomingManifest,build_attempts:[...attemptHistory,buildAttempt],package_revision:Number(existing.revision||1)};
+   if(returnedCandidate&&manifest.review_handoff)manifest.review_handoff={...manifest.review_handoff,state:'retried',retried_at:new Date().toISOString(),retried_by:input.actor??'integration-api'};
    delete manifest.validation;
    manifest.validation_invalidated={reason:'new_build_attempt',at:new Date().toISOString(),artifact_run_id:input.artifactRunId??null,source_sha:input.sourceSha??null,checksum:input.checksum??null};
    const row=(await pool.query(
