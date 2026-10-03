@@ -9,9 +9,9 @@ function publicState(s:any){
     pulse_at:s?.pulse_at??null,
     pulse_reason:s?.pulse_reason??null,
     runtime_policy:{
-      validation_ttl_seconds:Number(s?.validation_ttl_seconds||60),
+      validation_ttl_seconds:Number(s?.validation_ttl_seconds||5400),
       offline_grace_seconds:Number(s?.offline_grace_seconds||0),
-      pulse_poll_seconds:Number(s?.pulse_poll_seconds||15),
+      pulse_poll_seconds:Number(s?.pulse_poll_seconds||5400),
       max_failed_validations:Number(s?.max_failed_validations||3),
       allow_offline_grace:Boolean(s?.allow_offline_grace),
     },
