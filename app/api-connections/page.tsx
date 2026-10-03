@@ -43,7 +43,7 @@ export default async function ApiConnections(){
  const active=rows.filter((row:any)=>row.enabled).length;
 
  return <div className="shell"><SideNav active="api-connections"/><main className="main">
-  <PageHeader eyebrow="System / Official integrations" title="API Connections" description="License Manager is the trust authority for official OrbitFS API endpoints. Downstream systems may only select an exact enabled URL published here." badge={active?active+' ACTIVE':'REGISTRY EMPTY'}/>
+  <PageHeader eyebrow="System / Official integrations" title="API Connections" description="License Manager is the trust authority for official OrbitFS API endpoints. Only one endpoint per service can be active at a time; enabling a replacement disables the previous endpoint." badge={active?active+' ACTIVE':'REGISTRY EMPTY'}/>
 
   <div className="grid dashboard-metrics api-metrics">
    <div className="card metric-card"><div className="metric-icon icon-blue">⌁</div><div><span className="metric-label">Official endpoints</span><strong className="metric">{rows.length}</strong><small>{active} enabled</small></div></div>
@@ -66,7 +66,7 @@ export default async function ApiConnections(){
        <label><span>Timeout</span><div className="number-input"><input className="input" name="timeout_ms" type="number" min="1000" max="120000" defaultValue={Number(settings.timeout_ms||8000)} readOnly={!canManage}/><b>ms</b></div></label>
        <label><span>Cache</span><div className="number-input"><input className="input" name="cache_seconds" type="number" min="0" max="3600" defaultValue={Number(settings.cache_seconds||0)} readOnly={!canManage}/><b>sec</b></div></label>
        <label><span>Health path</span><input className="input mono" name="health_path" defaultValue={String(settings.health_path||'')} readOnly={!canManage}/></label>
-       {canManage&&<label className="toggle-line"><input type="checkbox" name="enabled" defaultChecked={Boolean(row.enabled)}/><span><b>Endpoint enabled</b><small>Only enabled endpoints are offered to OrbitFS clients.</small></span></label>}
+       {canManage&&<label className="toggle-line"><input type="checkbox" name="enabled" defaultChecked={Boolean(row.enabled)}/><span><b>Endpoint enabled</b><small>Enabling this endpoint automatically disables every other endpoint for the same service.</small></span></label>}
        {canManage&&<div className="policy-submit"><button className="button">Save official endpoint</button></div>}
       </div>
      </form>;
@@ -85,7 +85,7 @@ export default async function ApiConnections(){
     <label><span>Timeout</span><div className="number-input"><input className="input" name="timeout_ms" type="number" min="1000" max="120000" defaultValue="10000"/><b>ms</b></div></label>
     <label><span>Cache</span><div className="number-input"><input className="input" name="cache_seconds" type="number" min="0" max="3600" defaultValue="0"/><b>sec</b></div></label>
     <label><span>Health path</span><input className="input mono" name="health_path" defaultValue="/health"/></label>
-    <label className="toggle-line"><input type="checkbox" name="enabled" defaultChecked/><span><b>Endpoint enabled</b><small>Immediately available to approved OrbitFS clients.</small></span></label>
+    <label className="toggle-line"><input type="checkbox" name="enabled" defaultChecked/><span><b>Endpoint enabled</b><small>Activating this replacement automatically takes the previous endpoint offline for this service.</small></span></label>
     <div className="policy-submit"><button className="button">Add official endpoint</button></div>
    </form></div>
   </details>}
