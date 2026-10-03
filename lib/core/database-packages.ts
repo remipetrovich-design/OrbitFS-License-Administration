@@ -154,8 +154,8 @@ export async function createDatabasePackageCandidate(input:any,actor:string){
   const validated=validateDatabasePackage(input);
 
   const existing=(await db().query(
-    'select * from database_packages where component=$1 and database_schema_version=$2 and package_sha256=$3 limit 1',
-    [validated.component,validated.databaseSchemaVersion,validated.packageSha256]
+    'select * from database_packages where component=$1 and database_schema_version=$2 and package_sha256=$3 and source_repo=$4 and source_commit=$5 limit 1',
+    [validated.component,validated.databaseSchemaVersion,validated.packageSha256,validated.sourceRepo,validated.sourceCommit]
   )).rows[0];
   if(existing)return existing;
 
