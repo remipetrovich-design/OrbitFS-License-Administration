@@ -27,36 +27,28 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
   const {id}=await params; const body=await request.json().catch(()=>({})); const action=String(body.action||'').trim().toLowerCase();
   const current=(await db().query('select release_type from releases where id=$1 limit 1',[id])).rows[0];
   if(!current)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
-  if(action==='approve'||action==='reject'||action==='rollback'||action==='revert'){
+  if(action==='approve'||action==='reject'||action==='return_to_dev'||action==='send_back'||action==='rollback'||action==='revert'){
     const control=await integrationAuthorized(request,'releases.control');
     if(!control)return NextResponse.json({error:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE',code:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE'},{status:403});
     try{
       if(action==='approve')return NextResponse.json({release:await setReleaseReview(id,'approved',undefined,`api:${control.name}`,body.reason?String(body.reason):undefined)});
-      if(action==='reject')return NextResponse.json({release:await setReleaseReview(id,'rejected',undefined,`api:${control.name}`,body.reason?String(body.reason):undefined)});
+      if(action==='reject'||action==='return_to_dev'||action==='send_back')return NextResponse.json({release:await setReleaseReview(id,'rejected',undefined,`api:${control.name}`,body.reason?String(body.reason):'Returned to Dev/Control Centre for rework')});
       return NextResponse.json({release:await markReleaseRolledBack(id,String(body.reason||''),undefined,`api:${control.name}`,action==='revert'?'revert':'rollback')});
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Technical release control failed',code:'TECHNICAL_RELEASE_CONTROL_FAILED'},{status:400});}
   }
   if(action==='delete'){
+    const control=await integrationAuthorized(request,'releases.control');
+    if(!control)return NextResponse.json({error:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE',code:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE'},{status:403});
     try{
       const release=(await db().query('select * from releases where id=$1 limit 1',[id])).rows[0];
       if(!release)return NextResponse.json({error:'RELEASE_NOT_FOUND',code:'RELEASE_NOT_FOUND'},{status:404});
-      const confirmation=String(body.confirmation||body.confirm||'').trim();
-      const expected=`DELETE_RELEASE:${id}:${release.version}`;
-      if(body.permanent!==true||confirmation!==expected){
-        return NextResponse.json({
-          error:'PERMANENT_RELEASE_DELETE_CONFIRMATION_REQUIRED',
-          code:'PERMANENT_RELEASE_DELETE_CONFIRMATION_REQUIRED',
-          confirmation_required:expected,
-          message:'Permanent deletion destroys rollback history. Archive or supersede releases instead unless deliberate deletion is explicitly confirmed.'
-        },{status:409});
-      }
       const everPublished=release.status==='published'||Boolean(release.published_at);
       if(everPublished){
         return NextResponse.json({error:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',code:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',status:release.status,message:'Published release history is retained for rollback and audit. Only never-published release attempts can be permanently deleted.'},{status:409});
       }
       const deleted=(await db().query('delete from releases where id=$1 returning *',[id])).rows[0];
-      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${auth.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:deleted.published_at??null,permanent:true,confirmation})]);
-      return NextResponse.json({deleted:true,id,previous_status:deleted.status});
+      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${control.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:null,permanent:true,never_published:true,reason:body.reason?String(body.reason):null})]);
+      return NextResponse.json({deleted:true,id,previous_status:deleted.status,never_published:true});
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Release delete failed',code:'RELEASE_DELETE_FAILED'},{status:400});}
   }
   if(['withdraw','archive','restore'].includes(action)){
