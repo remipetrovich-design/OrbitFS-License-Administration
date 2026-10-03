@@ -745,12 +745,78 @@ export async function setReleaseReview(id:string,reviewStatus:'approved'|'reject
  const row=(await pool.query(`select * from releases where id=$1`,[id])).rows[0];
  if(!row)return null;
  assertLocalReleaseRow(row);
- if(row.status==='published')throw new Error('Published releases are immutable; create a new revision for changes.');
+ if(row.status==='published')throw new Error('Published releases are immutable; unpublish them before returning them to Dev Panel.');
  if(reviewStatus==='approved'&&(row.manifest?.validation?.status!=='passed'||!validationIdentityMatches(row)))throw new Error('Release must pass validation for this exact source/artifact before approval');
  const now=new Date();
+ const reasonText=String(reason||'').trim()||null;
+
+ // A release that has already been customer-published is immutable history.
+ // Returning it to Dev therefore creates a never-published rejected revision
+ // that Dev Panel can safely reuse for the next Stage 1 build.
+ if(reviewStatus==='rejected'&&row.published_at){
+  const existingReturned=(await pool.query(
+   `select * from releases
+    where supersedes_release_id=$1
+      and product_id=$2 and channel=$3 and version=$4 and release_type=$5 and source_repo=$6
+      and published_at is null and review_status='rejected'
+      and manifest->'review_handoff'->>'state'='returned_to_dev'
+    order by revision desc,created_at desc limit 1`,
+   [row.id,row.product_id,row.channel,row.version,row.release_type,row.source_repo]
+  )).rows[0];
+  if(existingReturned)return existingReturned;
+
+  const nextRevision=Number((await pool.query(
+   `select coalesce(max(revision),0)::int revision
+    from releases
+    where product_id=$1 and channel=$2 and version=$3 and release_type=$4 and source_repo=$5`,
+   [row.product_id,row.channel,row.version,row.release_type,row.source_repo]
+  )).rows[0].revision||0)+1;
+  const manifest={
+   ...(row.manifest||{}),
+   package_revision:nextRevision,
+   review_handoff:{
+    state:'returned_to_dev',
+    reason:reasonText,
+    rejected_at:now.toISOString(),
+    actor:actor??'admin',
+    source_release_id:row.id,
+    source_revision:Number(row.revision||1),
+    source_status:String(row.status||'withdrawn'),
+    previously_published:true
+   }
+  };
+  const returned=(await pool.query(
+   `insert into releases(
+      product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,
+      status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,
+      vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id
+    ) values(
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,
+      'draft',null,'rejected','not_started',$10,$11,$12,$13,
+      $14,$15,$16,$17,$18,$19
+    ) returning *`,
+   [row.product_id,row.channel,row.version,row.release_type,row.source_repo,row.source_ref,row.artifact_url,row.checksum,row.notes,
+    row.source_sha,row.artifact_name,row.artifact_repo,row.artifact_run_id,row.vercel_ready,row.supabase_ready,row.customer_publication_repo,
+    manifest,nextRevision,row.id]
+  )).rows[0];
+  const archived=(await pool.query(
+   'update releases set archived_at=$2,archived_by=$3 where id=$1 returning *',
+   [returned.id,now,actorUserId??null]
+  )).rows[0];
+  await pool.query(
+   `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+    values($1,$2,'release.review','release',$3,$4)`,
+   [actorUserId??null,actor??'admin',archived.id,JSON.stringify({
+    review_status:'rejected',reason:reasonText,handed_back_to_dev:true,
+    returned_from_release_id:row.id,previously_published:true,revision:nextRevision
+   })]
+  );
+  return archived;
+ }
+
  const manifest={...(row.manifest||{})};
  if(reviewStatus==='rejected'){
-  manifest.review_handoff={state:'returned_to_dev',reason:String(reason||'').trim()||null,rejected_at:now.toISOString(),actor:actor??'admin'};
+  manifest.review_handoff={state:'returned_to_dev',reason:reasonText,rejected_at:now.toISOString(),actor:actor??'admin'};
  }else if(manifest.review_handoff){
   manifest.review_handoff={...manifest.review_handoff,state:'resolved',resolved_at:now.toISOString(),resolved_by:actor??'admin'};
  }
@@ -766,7 +832,7 @@ export async function setReleaseReview(id:string,reviewStatus:'approved'|'reject
  if(!result.rows[0])return null;
  await pool.query(
   `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,$3,'release',$4,$5)`,
-  [actorUserId??null,actor??'admin','release.review',id,JSON.stringify({review_status:reviewStatus,reason:reason||null,handed_back_to_dev:reviewStatus==='rejected'})]
+  [actorUserId??null,actor??'admin','release.review',id,JSON.stringify({review_status:reviewStatus,reason:reasonText,handed_back_to_dev:reviewStatus==='rejected'})]
  );
  return result.rows[0];
 }
