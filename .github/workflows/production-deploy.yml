@@ -20,8 +20,8 @@ jobs:
       name: production
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_ORG_ID: team_W3fS0X03YCjNkD2BoqRj6Uld
+      VERCEL_PROJECT_ID: prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv
       VERCEL_CLI_VERSION: 59.23.1
 
     steps:
