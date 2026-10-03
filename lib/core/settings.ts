@@ -272,21 +272,41 @@ const GITHUB_PROFILE_TARGETS:Record<GithubProfileName,{tokenEnv:string;repos:Arr
   },
 };
 
+function githubCredentialCandidates(profile:GithubProfileName){
+  const target=GITHUB_PROFILE_TARGETS[profile];
+  const names=[
+    target.tokenEnv,
+    profile==='primary'?'ORBITFS_PRIMARY_GITHUB_TOKEN':'ORBITFS_FALLBACK_GITHUB_TOKEN',
+    'ORBITFS_RELEASE_DISPATCH_TOKEN',
+    'GITHUB_RELEASE_TOKEN',
+    'GITHUB_TOKEN',
+    'GITHUB_ACTIONS_TOKEN',
+  ];
+  return [...new Set(names)]
+    .map(name=>({name,value:String(process.env[name]||'').trim()}))
+    .filter(item=>Boolean(item.value));
+}
+
 async function verifyGithubProfileTarget(profile:GithubProfileName){
   const target=GITHUB_PROFILE_TARGETS[profile];
-  const token=String(process.env[target.tokenEnv]||'').trim();
-  if(!token)throw new Error('Cannot activate '+profile.toUpperCase()+': missing '+target.tokenEnv+' on License Manager');
-  const headers={authorization:'Bearer '+token,accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
-  const checked:Array<{repo:string;ref:string;sha:string}>=[];
+  const credentials=githubCredentialCandidates(profile);
+  const checked:Array<{repo:string;ref:string;sha:string;credential:string}>=[];
   for(const item of target.repos){
-    const repoResponse=await fetch('https://api.github.com/repos/'+item.repo,{headers,cache:'no-store'});
-    if(!repoResponse.ok)throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+' credential check failed ('+repoResponse.status+')');
-    const refResponse=await fetch('https://api.github.com/repos/'+item.repo+'/git/ref/heads/'+encodeURIComponent(item.ref),{headers,cache:'no-store'});
-    if(!refResponse.ok)throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+'@'+item.ref+' is unavailable ('+refResponse.status+')');
-    const ref=await refResponse.json();
-    const sha=String(ref?.object?.sha||'').trim();
-    if(!/^[a-f0-9]{40}$/i.test(sha))throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+'@'+item.ref+' did not return a valid commit');
-    checked.push({repo:item.repo,ref:item.ref,sha});
+    let verified:{sha:string;credential:string}|null=null;
+    const attempts=[...credentials,{name:'public',value:''}];
+    for(const credential of attempts){
+      const headers:Record<string,string>={accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
+      if(credential.value)headers.authorization='Bearer '+credential.value;
+      const repoResponse=await fetch('https://api.github.com/repos/'+item.repo,{headers,cache:'no-store'});
+      if(!repoResponse.ok)continue;
+      const refResponse=await fetch('https://api.github.com/repos/'+item.repo+'/git/ref/heads/'+encodeURIComponent(item.ref),{headers,cache:'no-store'});
+      if(!refResponse.ok)continue;
+      const ref=await refResponse.json();
+      const sha=String(ref?.object?.sha||'').trim();
+      if(/^[a-f0-9]{40}$/i.test(sha)){verified={sha,credential:credential.name};break;}
+    }
+    if(!verified)throw new Error('Cannot activate '+profile.toUpperCase()+': no configured License Manager GitHub credential can read '+item.repo+'@'+item.ref);
+    checked.push({repo:item.repo,ref:item.ref,sha:verified.sha,credential:verified.credential});
   }
   return checked;
 }
