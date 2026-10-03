@@ -558,7 +558,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
   const activeCandidate=existing.status==='draft'&&!existing.published_at&&(!existing.archived_at||returnedCandidate);
   if(activeCandidate){
    const attemptHistory=Array.isArray(existing.manifest?.build_attempts)?existing.manifest.build_attempts:[];
-   const attemptNumber=attemptHistory.length+1;
+   const attemptNumber=Math.max(Number(existing.manifest?.latest_attempt||0),...attemptHistory.map((item:any)=>Number(item?.attempt||0)),0)+1;
    const buildAttempt={
     attempt:attemptNumber,
     artifact_run_id:input.artifactRunId??null,
@@ -567,7 +567,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
     checksum:input.checksum??null,
     received_at:new Date().toISOString()
    };
-   const manifest={...(existing.manifest||{}),...incomingManifest,build_attempts:[...attemptHistory,buildAttempt],package_revision:Number(existing.revision||1)};
+   const manifest={...(existing.manifest||{}),...incomingManifest,build_attempts:[...attemptHistory,buildAttempt],latest_attempt:attemptNumber,package_revision:Number(existing.revision||1)};
    if(returnedCandidate&&manifest.review_handoff)manifest.review_handoff={...manifest.review_handoff,state:'retried',retried_at:new Date().toISOString(),retried_by:input.actor??'integration-api'};
    delete manifest.validation;
    manifest.validation_invalidated={reason:'new_build_attempt',at:new Date().toISOString(),artifact_run_id:input.artifactRunId??null,source_sha:input.sourceSha??null,checksum:input.checksum??null};
@@ -596,18 +596,22 @@ export async function createRelease(input:{productId:string;channel:string;versi
    [input.productId,input.channel,input.version,input.releaseType,expectedSource.repo]
   )).rows[0].revision||0)+1;
   const receivedAt=new Date().toISOString();
+  const previousAttempts=Array.isArray(existing.manifest?.build_attempts)?existing.manifest.build_attempts:[];
+  const attemptNumber=Math.max(Number(existing.manifest?.latest_attempt||0),...previousAttempts.map((item:any)=>Number(item?.attempt||0)),0)+1;
   const manifest={
    ...(existing.manifest||{}),
    ...incomingManifest,
    package_revision:nextRevision,
+   latest_attempt:attemptNumber,
    repackage:{
     source_release_id:existing.id,
     source_revision:Number(existing.revision||1),
     source_status:String(existing.status||''),
+    attempt:attemptNumber,
     created_at:receivedAt
    },
-   build_attempts:[{
-    attempt:1,
+   build_attempts:[...previousAttempts,{
+    attempt:attemptNumber,
     artifact_run_id:input.artifactRunId??null,
     artifact_repo:input.artifactRepo??null,
     source_sha:input.sourceSha??null,
@@ -628,7 +632,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
   await pool.query(
    `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
     values($1,$2,'release.repackage.intake','release',$3,$4)`,
-   [input.actorUserId??null,input.actor??'integration-api',row.id,JSON.stringify({version:input.version,release_type:input.releaseType,revision:nextRevision,repackages_release_id:existing.id,previous_revision:Number(existing.revision||1),artifact_run_id:input.artifactRunId??null})]
+   [input.actorUserId??null,input.actor??'integration-api',row.id,JSON.stringify({version:input.version,release_type:input.releaseType,revision:nextRevision,attempt:attemptNumber,repackages_release_id:existing.id,previous_revision:Number(existing.revision||1),artifact_run_id:input.artifactRunId??null})]
   );
   try{return await validateRelease(row.id,input.actorUserId??null,input.actor??'integration-api');}
   catch(error){
@@ -637,7 +641,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
   }
  }
 
- const manifest={...incomingManifest,package_revision:input.revision??1,build_attempts:[{attempt:1,artifact_run_id:input.artifactRunId??null,artifact_repo:input.artifactRepo??null,source_sha:input.sourceSha??null,checksum:input.checksum??null,received_at:new Date().toISOString()}]};
+ const manifest={...incomingManifest,package_revision:input.revision??1,latest_attempt:1,build_attempts:[{attempt:1,artifact_run_id:input.artifactRunId??null,artifact_repo:input.artifactRepo??null,source_sha:input.sourceSha??null,checksum:input.checksum??null,received_at:new Date().toISOString()}]};
  const result=await pool.query(
   `insert into releases(product_id,channel,version,release_type,source_repo,source_ref,artifact_url,checksum,notes,status,published_at,review_status,deployment_status,source_sha,artifact_name,artifact_repo,artifact_run_id,vercel_ready,supabase_ready,customer_publication_repo,manifest,revision,supersedes_release_id)
    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning *`,
@@ -710,17 +714,20 @@ async function validateVersionProgression(row:any){
  const repackageSourceId=String(row?.manifest?.repackage?.source_release_id||'').trim();
  if(repackageSourceId){
   const source=(await db().query(
-   "select id,product_id,channel,version,release_type,review_status,status,revision,checksum,source_sha,manifest from releases where id=$1 and product_id=$2 and channel=$3 and release_type=$4 and version=$5 limit 1",
-   [repackageSourceId,row.product_id,row.channel,row.release_type,version]
+   "select id,product_id,channel,version,release_type,review_status,status,revision,checksum,source_sha,source_repo,published_at,manifest from releases where id=$1 and product_id=$2 and channel=$3 and release_type=$4 and version=$5 and source_repo=$6 limit 1",
+   [repackageSourceId,row.product_id,row.channel,row.release_type,version,expectedReleaseSource(row.release_type).repo]
   )).rows[0];
   const sourceValidated=Boolean(
-   source&&source.review_status==='approved'&&
+   source&&source.review_status==='approved'&&Boolean(source.published_at)&&
    ['published','superseded','withdrawn','disabled'].includes(String(source.status||''))&&
-   source.manifest?.validation?.status==='passed'&&validationIdentityMatches(source)&&
-   Number(row.revision||0)>Number(source.revision||0)
+   source.manifest?.validation?.status==='passed'&&
+   Number(row.revision||0)>Number(source.revision||0)&&
+   String(row.supersedes_release_id||'')===String(source.id||'')
   );
   if(sourceValidated){
-   return {key:'version_progression',ok:true,message:`Version ${version} is an approved same-version package revision (r${Number(row.revision||0)}) replacing r${Number(source.revision||0)}; customers adopt it only when they redeploy.`};
+   const attempts=Array.isArray(row?.manifest?.build_attempts)?row.manifest.build_attempts:[];
+   const attempt=Math.max(Number(row?.manifest?.latest_attempt||0),...attempts.map((item:any)=>Number(item?.attempt||0)),1);
+   return {key:'version_progression',ok:true,message:`Version ${version} remains the customer version. Attempt ${attempt} / package r${Number(row.revision||0)} is a valid same-version repackage of published r${Number(source.revision||0)}; customers adopt it only when this revision is approved and published.`};
   }
  }
 
