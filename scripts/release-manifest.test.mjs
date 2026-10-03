@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 const here=dirname(fileURLToPath(import.meta.url));
 const manifestScript=join(here,"release-manifest.mjs");
 const root=mkdtempSync(join(tmpdir(),"orbitfs-release-manifest-"));
-const source=join(root,"source");
 const target=join(root,"target");
 
 function run(cwd,command,args,env={}){
@@ -28,33 +27,11 @@ function commit(cwd,message){
  git(cwd,"add","-A");git(cwd,"commit","-q","-m",message);return git(cwd,"rev-parse","HEAD");
 }
 
-init(source);
-write(source,"app.txt","v1\n");
-write(source,".github/workflows/source.yml","name: source\n");
-const sourceBase=commit(source,"primary production baseline");
-
 init(target);
 write(target,"app.txt","v1\n");
-write(target,".github/workflows/fallback.yml","name: fallback\n");
-const targetBase=commit(target,"mirror equivalent baseline");
+const targetBase=commit(target,"production baseline");
 write(target,"app.txt","v2\n");
-const targetHead=commit(target,"fallback change");
-
-run(target,process.execPath,[manifestScript],{
- RELEASE_BASE_SHA:sourceBase,
- RELEASE_BASE_REPOSITORY:"lucaskerim123/Custom-licence-manager",
- RELEASE_BASE_GIT_URL:source,
- GITHUB_REPOSITORY:"remipetrovich-design/OrbitFS-License-Administration",
- GITHUB_REF_NAME:"main"
-});
-const mirrorManifest=JSON.parse(readFileSync(join(target,"release-manifest.json"),"utf8"));
-if(mirrorManifest.schemaVersion!==3)throw new Error("Expected release manifest schemaVersion 3");
-if(mirrorManifest.previousDeploymentSha!==sourceBase)throw new Error("Foreign production SHA was not preserved");
-if(mirrorManifest.changeBaseSha!==targetBase)throw new Error("Equivalent fallback commit was not selected");
-if(mirrorManifest.mirrorEquivalentSha!==targetBase)throw new Error("Mirror equivalent SHA was not recorded");
-if(mirrorManifest.changeBaseSource!=="previous-production-deployment-mirror-equivalent")throw new Error("Mirror baseline source was not recorded");
-if(mirrorManifest.headSha!==targetHead)throw new Error("Target HEAD mismatch");
-if(JSON.stringify(mirrorManifest.changedFiles)!==JSON.stringify(["app.txt"]))throw new Error("Mirror diff should contain only the post-baseline app change");
+const targetHead=commit(target,"next change");
 
 run(target,process.execPath,[manifestScript],{
  RELEASE_BASE_SHA:targetBase,
@@ -63,7 +40,23 @@ run(target,process.execPath,[manifestScript],{
  GITHUB_REF_NAME:"main"
 });
 const localManifest=JSON.parse(readFileSync(join(target,"release-manifest.json"),"utf8"));
+if(localManifest.schemaVersion!==3)throw new Error("Expected release manifest schemaVersion 3");
+if(localManifest.previousDeploymentSha!==targetBase)throw new Error("Local production SHA was not preserved");
+if(localManifest.previousDeploymentRepository!=="remipetrovich-design/OrbitFS-License-Administration")throw new Error("Local repository identity was not preserved");
 if(localManifest.changeBaseSha!==targetBase)throw new Error("Local production baseline changed unexpectedly");
 if(localManifest.changeBaseSource!=="previous-production-deployment")throw new Error("Local baseline source changed unexpectedly");
+if(localManifest.headSha!==targetHead)throw new Error("Target HEAD mismatch");
+if(JSON.stringify(localManifest.changedFiles)!==JSON.stringify(["app.txt"]))throw new Error("Local diff should contain only the post-baseline app change");
 
-console.log("release-manifest mirror baseline tests passed");
+let rejected=false;
+try{
+ run(target,process.execPath,[manifestScript],{
+  RELEASE_BASE_SHA:targetBase,
+  RELEASE_BASE_REPOSITORY:"other-owner/other-license-manager",
+  GITHUB_REPOSITORY:"remipetrovich-design/OrbitFS-License-Administration",
+  GITHUB_REF_NAME:"main"
+ });
+}catch{rejected=true}
+if(!rejected)throw new Error("Cross-repository production baseline must be rejected");
+
+console.log("release-manifest local baseline tests passed");
