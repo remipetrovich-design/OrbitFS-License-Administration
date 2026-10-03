@@ -59,8 +59,18 @@ jobs:
           test "${GITHUB_REF}" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "$(git rev-parse --is-shallow-repository)" = "false"
-          git fetch origin main --prune
-          test "$(git rev-parse origin/main)" = "${GITHUB_SHA}"
+          git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main
+          main_sha="$(git rev-parse refs/remotes/origin/main)"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "$main_sha"; then
+            echo "::error::Selected deployment commit ${GITHUB_SHA} is no longer part of current main history (${main_sha})."
+            exit 1
+          fi
+          if [ "$main_sha" != "${GITHUB_SHA}" ]; then
+            echo "main advanced after workflow dispatch."
+            echo "Selected deployment commit: ${GITHUB_SHA}"
+            echo "Current main commit: $main_sha"
+            echo "Continuing with the immutable commit captured by workflow_dispatch."
+          fi
           test -f package-lock.json
           test -f vercel.json
           node - <<'NODE'
