@@ -52,7 +52,7 @@ jobs:
         if: steps.profile.outputs.run == 'true'
         run: npm ci
 
-      - name: Test release manifest mirror baseline resolution
+      - name: Test release manifest local baseline resolution
         if: steps.profile.outputs.run == 'true'
         run: node scripts/release-manifest.test.mjs
 
