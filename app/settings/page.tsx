@@ -144,7 +144,7 @@ export default async function Settings(){
  const rows=[
   {field:'system_enabled',label:'External authority / master shutdown',help:'This is the master shutdown switch for external License Manager authority. Turning it off rejects runtime licensing, release and deployment authority requests while leaving this admin panel available.',onText:'External API authority is online',offText:'External API authority is offline',enabled:Boolean(s.system_enabled)},
   {field:'licensing_enabled',label:'License validation & issuance',help:'Controls license issuance and runtime validation. Turning this off makes license checks fail closed and sends a pulse so connected runtimes re-check authority.',onText:'Licensing is accepting validations',offText:'Licensing validations are blocked',enabled:Boolean(s.licensing_enabled)},
-  {field:'maintenance_mode',label:'Maintenance enforcement',help:'Makes runtime validation deliberately unavailable while keeping the admin plane accessible. Offline grace remains governed by the runtime policy below.',onText:'Maintenance mode is active',offText:'Normal validation mode',dangerWhen:true,enabled:Boolean(s.maintenance_mode)},
+  {field:'maintenance_mode',label:'Maintenance enforcement',help:'Makes licence validation and issuance deliberately unavailable and disables customer installation unlock while keeping the admin plane accessible. Offline grace remains governed by the runtime policy below.',onText:'Maintenance enforcement is active',offText:'Normal validation mode',dangerWhen:true,enabled:Boolean(s.maintenance_mode)},
   {field:'customer_self_unlock_enabled',label:'Customer installation unlock',help:'Allows customers to release their currently bound OrbitFS installation from the Billing Store so the same licence can bind to a reinstall or replacement system. OrbitFS still permits only one bound system at a time.',onText:'Customers can unlock / release their installation',offText:'Only administrators can release installations',enabled:Boolean(s.customer_self_unlock_enabled)},
   {field:'release_system_enabled',label:'Release authority',help:'Controls authoritative release intake, validation and state APIs. Billing Store publication remains a separate final gate.',onText:'Release authority is online',offText:'Release authority is blocked',enabled:Boolean(s.release_system_enabled)},
   {field:'auto_technical_approval_enabled',label:'Auto technical approval',help:'When every License Manager technical validation check passes for the exact source/artifact, automatically mark the release technically approved. This never publishes, exposes to customers, or starts deployment; Billing Store Admin remains the final publication gate.',onText:'Passed releases auto-approve for Billing Store review',offText:'Technical approval requires a manual decision',enabled:Boolean(s.auto_technical_approval_enabled)},
@@ -154,22 +154,31 @@ export default async function Settings(){
   {field:'rollback_enabled',label:'Rollback authorization',help:'Allows customer rollback/checkpoint authorization where the customer deployer supports it.',onText:'Rollback authorization is online',offText:'Rollback authorization is blocked',enabled:Boolean(s.rollback_enabled)}
  ];
 
+ const masterEnabled=Boolean(s.system_enabled);
+ const maintenance=masterEnabled&&Boolean(s.maintenance_mode);
+ const deploymentEnabled=masterEnabled&&Boolean(s.deployment_enabled);
+ const effectiveEnabled=(field:string,configured:boolean)=>{
+  if(field==='system_enabled')return configured;
+  if(!masterEnabled)return false;
+  if((field==='licensing_enabled'||field==='customer_self_unlock_enabled')&&maintenance)return false;
+  if(['base_deployment_enabled','update_deployment_enabled','rollback_enabled'].includes(field)&&!deploymentEnabled)return false;
+  return configured;
+ };
  const serviceRows=rows.filter(r=>!r.dangerWhen);
- const liveCount=serviceRows.filter(r=>r.enabled).length;
- const maintenance=Boolean(s.maintenance_mode);
+ const liveCount=serviceRows.filter(r=>effectiveEnabled(r.field,r.enabled)).length;
 
  return <div className="shell"><SideNav active="settings"/><main className="main">
-  <PageHeader eyebrow="System / Runtime control" title="API Control Center" description="Control License Manager authority services and runtime enforcement. Integration credentials are managed separately under API Access." badge={Boolean(s.system_enabled)&&!maintenance?'LIVE':maintenance?'MAINTENANCE':'OFFLINE'}/>
+  <PageHeader eyebrow="System / Runtime control" title="API Control Center" description="Control License Manager authority services and runtime enforcement. Integration credentials are managed separately under API Access." badge={!masterEnabled?'OFFLINE':maintenance?'MAINTENANCE':'LIVE'}/>
 
   <div className="grid dashboard-metrics api-metrics">
-   <div className="card metric-card"><div className="metric-icon icon-green">⚡</div><div><span className="metric-label">Authority services</span><strong className="metric">{liveCount}/{serviceRows.length}</strong><small>{Boolean(s.system_enabled)?'Master authority enabled':'Master authority offline'}</small></div></div>
-   <div className="card metric-card"><div className="metric-icon icon-red">◷</div><div><span className="metric-label">Runtime mode</span><strong className="metric api-mode-metric">{maintenance?'Maintenance':Boolean(s.licensing_enabled)?'Online':'Blocked'}</strong><small>License validation enforcement</small></div></div>
+   <div className="card metric-card"><div className="metric-icon icon-green">⚡</div><div><span className="metric-label">Authority services</span><strong className="metric">{liveCount}/{serviceRows.length}</strong><small>{masterEnabled?'Master authority enabled':'Master authority offline'}</small></div></div>
+   <div className="card metric-card"><div className="metric-icon icon-red">◷</div><div><span className="metric-label">Runtime mode</span><strong className="metric api-mode-metric">{!masterEnabled?'Offline':maintenance?'Maintenance':Boolean(s.licensing_enabled)?'Online':'Blocked'}</strong><small>License validation enforcement</small></div></div>
    <div className="card metric-card"><div className="metric-icon icon-blue">⌁</div><div><span className="metric-label">Validation TTL</span><strong className="metric">{Number(s.validation_ttl_seconds||5400)}s</strong><small>Pulse poll {Number(s.pulse_poll_seconds||5400)}s</small></div></div>
    <div className="card metric-card"><div className="metric-icon icon-indigo">#</div><div><span className="metric-label">Pulse revision</span><strong className="metric">{Number(s.pulse_revision||0)}</strong><small>{s.pulse_at?new Date(s.pulse_at).toLocaleString():'No pulse recorded'}</small></div></div>
   </div>
 
   <section className="section">
-   <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">These switches directly control licensing, release and deployment authority, including Base, Update and rollback authorization. Changes are audited and pulse connected runtimes when required.</p></div></div>
+   <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">Hardware-style authority controls. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
    <AuthorityControlGrid rows={rows} canManage={canManage} action={updateSettings}/>
   </section>
 

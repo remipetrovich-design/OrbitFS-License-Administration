@@ -118,8 +118,9 @@ export async function POST(
       if (!installationId) return NextResponse.json({ error: 'installation_id is required for installation control' }, { status: 400 });
       if (current.status !== 'active') return NextResponse.json({ error: 'Unlock is unavailable unless the licence is active', code: 'LICENSE_CONTROLS_LOCKED' }, { status: 409 });
       if (action === 'customer-unlock') {
-        const settings = (await db().query('select customer_self_unlock_enabled from system_settings where id=true')).rows[0];
-        if (!settings?.customer_self_unlock_enabled) return NextResponse.json({ error: 'Customer installation unlock is disabled by License Manager', code: 'CUSTOMER_INSTALLATION_UNLOCK_DISABLED' }, { status: 403 });
+        const settings = (await db().query('select system_enabled,licensing_enabled,maintenance_mode,customer_self_unlock_enabled from system_settings where id=true')).rows[0];
+        const customerUnlockEffective=Boolean(settings?.system_enabled)&&Boolean(settings?.licensing_enabled)&&!Boolean(settings?.maintenance_mode)&&Boolean(settings?.customer_self_unlock_enabled);
+        if (!customerUnlockEffective) return NextResponse.json({ error: 'Customer installation unlock is disabled by License Manager authority', code: 'CUSTOMER_INSTALLATION_UNLOCK_DISABLED' }, { status: 403 });
       }
       const activation = (await db().query('select id,status from activations where license_id=$1 and installation_id=$2 limit 1',[id,installationId])).rows[0];
       if (!activation) return NextResponse.json({ error: 'Installation not found for this license' }, { status: 404 });
