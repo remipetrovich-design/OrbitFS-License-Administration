@@ -29,7 +29,7 @@ export async function POST(request:Request){
     const sourceRef=String(body.source_ref??body.sourceRef??'').trim();
     const expectedSource=releaseType==='base'
       ? {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'}
-      : {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASES'};
+      : {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASE'};
     if(sourceRepo!==expectedSource.repo||sourceRef!==expectedSource.ref)return NextResponse.json({error:'SOURCE_SYSTEM_MISMATCH',expected_repo:expectedSource.repo,expected_ref:expectedSource.ref},{status:400});
     const requestedPublicationRepo=String(body.customer_publication_repo??body.customerPublicationRepo??'').trim();
     const defaultCustomerPublicationRepo='remipetrovich-design/OrbitFS-Billing-Shopfront';
