@@ -31,14 +31,12 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     const control=await integrationAuthorized(request,'releases.control');
     if(!control)return NextResponse.json({error:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE',code:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE'},{status:403});
     try{
-      if(action==='approve')return NextResponse.json({release:await setReleaseReview(id,'approved',undefined,`api:${control.name}`,body.reason?String(body.reason):undefined)});
+      if(action==='approve')return NextResponse.json({release:await setReleaseReview(id,'approved',undefined,`api:${auth.name}`,body.reason?String(body.reason):undefined)});
       if(action==='reject'||action==='return_to_dev'||action==='send_back')return NextResponse.json({release:await setReleaseReview(id,'rejected',undefined,`api:${control.name}`,body.reason?String(body.reason):'Returned to Dev/Control Centre for rework')});
       return NextResponse.json({release:await markReleaseRolledBack(id,String(body.reason||''),undefined,`api:${control.name}`,action==='revert'?'revert':'rollback')});
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Technical release control failed',code:'TECHNICAL_RELEASE_CONTROL_FAILED'},{status:400});}
   }
   if(action==='delete'){
-    const control=await integrationAuthorized(request,'releases.control');
-    if(!control)return NextResponse.json({error:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE',code:'TECHNICAL_RELEASE_CONTROL_REQUIRES_CONTROL_SCOPE'},{status:403});
     try{
       const release=(await db().query('select * from releases where id=$1 limit 1',[id])).rows[0];
       if(!release)return NextResponse.json({error:'RELEASE_NOT_FOUND',code:'RELEASE_NOT_FOUND'},{status:404});
