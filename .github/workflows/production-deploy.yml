@@ -23,6 +23,7 @@ jobs:
       VERCEL_ORG_ID: team_W3fS0X03YCjNkD2BoqRj6Uld
       VERCEL_PROJECT_ID: prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv
       VERCEL_CLI_VERSION: 59.23.1
+
     steps:
       - name: Checkout complete repository history at selected commit
         uses: actions/checkout@v6
@@ -80,7 +81,35 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Generate immutable release/change-set manifest
+      - name: Resolve previous production deployment
+        id: production_state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+          response="$(curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=1&teamId=$VERCEL_ORG_ID")"
+          deployed_sha="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubCommitSha // empty')"
+          deployed_url="$(printf '%s' "$response" | jq -r '.deployments[0].url // empty')"
+          echo "deployed_sha=$deployed_sha" >> "$GITHUB_OUTPUT"
+          if [ -n "$deployed_url" ]; then
+            echo "deployment_url=https://$deployed_url" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$deployed_sha" = "$GITHUB_SHA" ]; then
+            echo "already_deployed=true" >> "$GITHUB_OUTPUT"
+            echo "Exact commit is already the latest READY production deployment."
+          else
+            echo "already_deployed=false" >> "$GITHUB_OUTPUT"
+            echo "Previous production commit: ${deployed_sha:-none}"
+            echo "Target production commit: $GITHUB_SHA"
+          fi
+
+      - name: Generate complete since-last-deploy change manifest
+        env:
+          RELEASE_BASE_SHA: ${{ steps.production_state.outputs.deployed_sha }}
         run: node scripts/release-manifest.mjs
 
       - name: Upload release/change-set manifest
@@ -91,24 +120,18 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Verify production deployment identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$VERCEL_TOKEN"
-          test -n "$VERCEL_ORG_ID"
-          test -n "$VERCEL_PROJECT_ID"
-          test -n "$VERCEL_CLI_VERSION"
-
       - name: Install pinned Vercel CLI
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: |
           npm install --global "vercel@$VERCEL_CLI_VERSION"
           vercel --version
 
       - name: Pull production configuration only
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Verify pulled production project identity
+        if: steps.production_state.outputs.already_deployed != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -121,12 +144,24 @@ jobs:
           NODE
 
       - name: Build exact production artifact without deploying
+        if: steps.production_state.outputs.already_deployed != 'true'
         run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
-      - name: Inspect exact prebuilt production artifact
-        run: vercel deploy --prebuilt --dry --format=json --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+      - name: Verify prebuilt production artifact locally
+        if: steps.production_state.outputs.already_deployed != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .vercel/output/config.json
+          test -d .vercel/output/functions -o -d .vercel/output/static
+          node - <<'NODE'
+          const fs=require('fs');
+          const config=JSON.parse(fs.readFileSync('.vercel/output/config.json','utf8'));
+          if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
+          NODE
 
       - name: Deploy exact validated prebuilt artifact to production
+        if: steps.production_state.outputs.already_deployed != 'true'
         id: deploy
         shell: bash
         run: |
@@ -137,8 +172,12 @@ jobs:
             *) echo "::error::Vercel did not return a production deployment URL"; exit 1 ;;
           esac
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
-
-      - name: Report deployed commit
-        run: |
           echo "Production deployment completed for immutable commit $GITHUB_SHA."
-          echo "Deployment: ${{ steps.deploy.outputs.url }}"
+          echo "Deployment: $deployment_url"
+
+      - name: Reuse existing production deployment
+        if: steps.production_state.outputs.already_deployed == 'true'
+        run: |
+          echo "Production deployment not required."
+          echo "Commit: $GITHUB_SHA"
+          echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"

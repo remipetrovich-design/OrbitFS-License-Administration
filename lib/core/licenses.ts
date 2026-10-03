@@ -24,7 +24,9 @@ function runtimeComponentStates(licenseComponent:string,entitlements:Record<stri
   return out;
 }
 function hashKey(key: string) { return crypto.createHash('sha256').update(key, 'utf8').digest('hex'); }
+export function hashLicenseCredential(key:string){return hashKey(key)}
 export function generateLicenseKey() { return `LIC-${crypto.randomBytes(5).toString('hex').toUpperCase()}-${crypto.randomBytes(5).toString('hex').toUpperCase()}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`; }
+export function generateInstallationCredential(){return generateLicenseKey()}
 
 export async function issueLicense(input: { productId: string; customerExternalId?: string | null; customerOverride?: boolean; externalReference?: string | null; expiresAt?: Date | null; actorUserId?: string | null; actor?: string; metadata?: Record<string, unknown> }) {
   const pool=db();
@@ -57,15 +59,21 @@ export async function issueLicense(input: { productId: string; customerExternalI
 
 export async function validateLicense(input:{key:string;productSlug:string;componentSlug?:string;installationId?:string;productVersion?:string;metadata?:Record<string,unknown>;requestIp?:string|null;userAgent?:string|null;telemetry?:Record<string,unknown>;action?:string}){
   const pool=db();const state=(await pool.query('select system_enabled,licensing_enabled,maintenance_mode,validation_ttl_seconds,offline_grace_seconds,pulse_poll_seconds,max_failed_validations,allow_offline_grace,pulse_revision,pulse_at,pulse_reason from system_settings where id=true')).rows[0];
-  const runtime_policy={validation_ttl_seconds:Number(state?.validation_ttl_seconds||60),offline_grace_seconds:Number(state?.offline_grace_seconds||0),pulse_poll_seconds:Number(state?.pulse_poll_seconds||15),max_failed_validations:Number(state?.max_failed_validations||3),allow_offline_grace:Boolean(state?.allow_offline_grace),pulse_revision:Number(state?.pulse_revision||0),pulse_at:state?.pulse_at??null,pulse_reason:state?.pulse_reason??null};
-  if(!state?.system_enabled||!state.licensing_enabled||state.maintenance_mode)return{valid:false,code:'AUTHORITY_UNAVAILABLE' as const,status:503,runtime_policy};
+  const authority_reason=!state?.system_enabled?'manual_shutdown':!state?.licensing_enabled?'licensing_disabled':state?.maintenance_mode?'maintenance':null;
+  const runtime_policy={validation_ttl_seconds:Number(state?.validation_ttl_seconds||60),offline_grace_seconds:Number(state?.offline_grace_seconds||0),pulse_poll_seconds:Number(state?.pulse_poll_seconds||15),max_failed_validations:Number(state?.max_failed_validations||3),allow_offline_grace:Boolean(state?.allow_offline_grace),pulse_revision:Number(state?.pulse_revision||0),pulse_at:state?.pulse_at??null,pulse_reason:state?.pulse_reason??null,provider_outage_freeze_enabled:true,manual_authority_offline_uses_grace:true,freeze_grace_on_provider_failure:true,freeze_failure_counter_on_provider_failure:true,authority_reason};
+  if(authority_reason)return{valid:false,code:'AUTHORITY_UNAVAILABLE' as const,status:503,runtime_policy,authority_reason,provider_outage:false,grace_action:'normal' as const,failure_counter_action:'normal' as const};
   const componentSlug=input.componentSlug||input.productSlug;
   const productFamily=input.productSlug==='orbitfs'?'orbitfs':componentSlug.startsWith('orbitfs_')?'orbitfs':input.productSlug;
   if(productFamily!=='orbitfs')return{valid:false,code:'LICENSE_NOT_FOUND' as const,status:404,runtime_policy};
   if(!input.installationId)return{valid:false,code:'INSTALLATION_ID_REQUIRED' as const,status:400,runtime_policy};
-  const result=await pool.query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component,p.status product_status from licenses l join products p on p.id=l.product_id where l.license_key_hash=$1 and p.slug like 'orbitfs_%' limit 1`,[hashKey(input.key)]);
+  const credentialHash=hashKey(input.key);
+  let result=await pool.query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component,p.status product_status,false as credential_scoped from licenses l join products p on p.id=l.product_id where l.license_key_hash=$1 and p.slug like 'orbitfs_%' limit 1`,[credentialHash]);
+  if(!result.rowCount&&input.installationId){
+    result=await pool.query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component,p.status product_status,true as credential_scoped,a.status credential_activation_status from activations a join licenses l on l.id=a.license_id join products p on p.id=l.product_id where a.installation_id=$1 and a.metadata->>'runtime_credential_hash'=$2 and p.slug like 'orbitfs_%' limit 1`,[input.installationId,credentialHash]);
+  }
   if(!result.rowCount)return{valid:false,code:'LICENSE_NOT_FOUND' as const,status:404,runtime_policy};
   const license=result.rows[0];
+  if(license.credential_scoped===true&&license.credential_activation_status!=='active')return{valid:false,code:'INSTALLATION_RELEASED' as const,status:403,runtime_policy};
   const policy=license.metadata&&typeof license.metadata==='object'&&license.metadata.license_policy&&typeof license.metadata.license_policy==='object'?license.metadata.license_policy:{};
   const entitledComponents=policy.components&&typeof policy.components==='object'?policy.components:{};
   const validationAction=String(input.action||'validate').trim().toLowerCase();

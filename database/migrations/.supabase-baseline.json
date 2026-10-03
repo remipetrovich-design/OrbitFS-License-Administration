@@ -19,7 +19,11 @@
     "database/migrations/20260925_repair_release_channel_access_mode.sql": "315d25b96d357e5240b2efa40f35975a6bbb857a",
     "database/migrations/20260928020000_release_lifecycle_states.sql": "03f849c9917ab41af3773e0b00d0e533192fe0c4",
     "database/migrations/20260928_allow_admin_multiple_customer_licenses.sql": "2992a40554777f1d42796c13b91199424bf7475e",
-    "database/migrations/20260929_official_api_connections.sql": "cf5f854ae44bc028c34ff6028127f278012a39df"
+    "database/migrations/20260929_official_api_connections.sql": "cf5f854ae44bc028c34ff6028127f278012a39df",
+    "database/migrations/20260929_official_api_connections_v2.sql": "84b861a5a689da7d5d90ab658aa4982d72a0a8fb",
+    "database/migrations/20261001_emergency_lockdown.sql": "2d339b70200c4a9df5beb18cea582915a1b55857",
+    "database/migrations/20261002_database_package_registry.sql": "9c61a2b5210efd69fda4ab2a1401464801b7a6e0",
+    "database/migrations/20261002_auto_technical_approval.sql": "fa8f45a8a82524dbdc10719a2cbe1787a42d6114"
   },
   "remote_migrations": [
     {
@@ -125,6 +129,38 @@
     {
       "version": "20260928121932",
       "name": "allow_admin_multiple_customer_licenses"
+    },
+    {
+      "version": "20260929001352",
+      "name": "official_api_connections_v2"
+    },
+    {
+      "version": "20261001062214",
+      "name": "dev_control_core"
+    },
+    {
+      "version": "20261001062619",
+      "name": "emergency_lockdown"
+    },
+    {
+      "version": "20261001071005",
+      "name": "dev_mcp_networking"
+    },
+    {
+      "version": "20261001072726",
+      "name": "dev_mcp_oauth"
+    },
+    {
+      "version": "20261001113948",
+      "name": "expand_private_mcp_controls_live"
+    },
+    {
+      "version": "20261001144526",
+      "name": "database_package_registry"
+    },
+    {
+      "version": "20261001213329",
+      "name": "auto_technical_approval"
     }
   ]
 }

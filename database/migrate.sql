@@ -12,6 +12,7 @@ create table if not exists user_sessions (
   token_hash text unique not null, expires_at timestamptz not null, created_at timestamptz not null default now(), last_seen_at timestamptz not null default now(), user_agent text, ip_address text
 );
 alter table if exists system_settings add column if not exists release_system_enabled boolean not null default true;
+alter table if exists system_settings add column if not exists auto_technical_approval_enabled boolean not null default true;
 alter table if exists system_settings add column if not exists deployment_enabled boolean not null default true;
 alter table if exists system_settings add column if not exists customer_self_unlock_enabled boolean not null default true;
 alter table if exists user_sessions add column if not exists user_agent text;

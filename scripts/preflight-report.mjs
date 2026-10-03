@@ -24,6 +24,13 @@ const run=(label,command,args)=>{
  if(r.status!==0){failures.push({label,exitCode:r.status??1,output:contexts(output)});console.error(output);return false;}
  return true;
 };
+const runInfo=(label,command,args)=>{
+ console.log("\n=== "+label+" ===");const r=spawnSync(command,args,{encoding:"utf8",shell:false});
+ const output=[r.stdout||"",r.stderr||""].join("\n").trim();
+ if(output)console.log(output);
+ if(r.status!==0)console.warn(label+" reported findings but is informational for release gating.");
+ return r.status===0;
+};
 if(!existsSync("package-lock.json"))failures.push({label:"Repository / lockfile",exitCode:1,output:["package-lock.json is missing."]});
 if(!existsSync("vercel.json"))failures.push({label:"Vercel configuration",exitCode:1,output:["vercel.json is missing."]});
 else{try{const v=JSON.parse(readFileSync("vercel.json","utf8"));if(v?.git?.deploymentEnabled!==false)failures.push({label:"Automatic Vercel deployments",exitCode:1,output:["vercel.json does not disable automatic Git deployments."]});}catch(e){failures.push({label:"Vercel configuration",exitCode:1,output:[String(e)]});}}
@@ -31,7 +38,8 @@ run("Clean locked dependency install",npm,["ci"]);
 run("Whitespace / patch integrity","git",["diff","--check"]);
 run("Lint",npm,["run","lint"]);
 run("Typecheck",npm,["run","typecheck"]);
-run("Dependency audit",npm,["audit","--audit-level=high"]);
+run("Production dependency audit",npm,["audit","--omit=dev","--audit-level=high"]);
+runInfo("Development dependency audit (informational)",npm,["audit","--include=dev","--audit-level=high"]);
 run("Production build",npm,["run","build"]);
 if(failures.length){const out=["ORBITFS VALIDATION FAILED","========================","All detected failure contexts are retained. Successful-step output is excluded.","","Failures: "+failures.length,""];for(const f of failures)out.push("## "+f.label,"Exit code: "+f.exitCode,"","ERRORS:",...(f.output||["(no error output)"]),"");writeFileSync(dir+"/validation-error.txt",out.join("\n"));console.error("\nValidation failed. Report: "+dir+"/validation-error.txt");process.exit(1);}
 rmSync(dir,{recursive:true,force:true});console.log("\n=== Preflight PASSED ===");

@@ -240,3 +240,100 @@ export async function getCurrentDatabasePackage(componentValue:string){
     [selected]
   )).rows[0]||null;
 }
+
+type ReleaseDatabasePackageReference={
+  id:string;
+  component:CustomerDatabaseComponent;
+  databaseSchemaVersion:number;
+  sha256:string;
+  sourceCommit:string;
+};
+
+function releaseDatabaseComponents(row:any):CustomerDatabaseComponent[]{
+  if(String(row?.release_type||'')==='base')return ['base'];
+  const components=Array.isArray(row?.manifest?.components)?row.manifest.components:[];
+  const selected=[...new Set(components.map((value:any)=>String(value||'').trim().toLowerCase()).filter((value:string)=>['mcp','apex','studio'].includes(value)))];
+  return ['engine-shared',...selected] as CustomerDatabaseComponent[];
+}
+
+function releaseDatabaseReferences(row:any):ReleaseDatabasePackageReference[]{
+  const contract=row?.manifest?.databasePackages;
+  if(!contract||contract.format!=='orbitfs-database-package-set-v1'||!Array.isArray(contract.packages))return[];
+  return contract.packages.map((item:any)=>({
+    id:String(item?.id||'').trim(),
+    component:String(item?.component||'').trim().toLowerCase() as CustomerDatabaseComponent,
+    databaseSchemaVersion:Number(item?.databaseSchemaVersion),
+    sha256:String(item?.sha256||'').trim().toLowerCase(),
+    sourceCommit:String(item?.sourceCommit||'').trim().toLowerCase()
+  }));
+}
+
+export async function validateReleaseDatabasePackages(row:any){
+  const required=releaseDatabaseComponents(row);
+  const refs=releaseDatabaseReferences(row);
+  if(refs.length!==required.length){
+    return {ok:false,message:`Release requires database packages [${required.join(', ')}], but ${refs.length} package reference(s) were supplied.`};
+  }
+  const refByComponent=new Map(refs.map((ref)=>[ref.component,ref]));
+  const missing=required.filter((component)=>!refByComponent.has(component));
+  const extra=refs.filter((ref)=>!required.includes(ref.component));
+  if(missing.length||extra.length){
+    return {ok:false,message:`Database package component set does not match release targets. Missing: ${missing.join(', ')||'none'}; extra: ${extra.map((x)=>x.component).join(', ')||'none'}.`};
+  }
+  const ids=refs.map((ref)=>ref.id);
+  if(ids.some((id)=>!/^[0-9a-f-]{36}$/i.test(id))||new Set(ids).size!==ids.length){
+    return {ok:false,message:'Database package references contain an invalid or duplicate id.'};
+  }
+  const rows=(await db().query(
+    `select id,component,source_repo,source_commit,database_schema_version,package_sha256,status
+     from database_packages where id = any($1::uuid[])`,
+    [ids]
+  )).rows;
+  if(rows.length!==refs.length)return {ok:false,message:'One or more referenced database packages do not exist.'};
+  const byId=new Map(rows.map((item:any)=>[String(item.id),item]));
+  const releaseCommit=String(row?.source_sha||'').trim().toLowerCase();
+  for(const ref of refs){
+    const stored:any=byId.get(ref.id);
+    if(!stored)return {ok:false,message:'Referenced database package was not found: '+ref.id};
+    if(stored.component!==ref.component)return {ok:false,message:'Database package component mismatch for '+ref.id};
+    if(!['candidate','current'].includes(String(stored.status||'')))return {ok:false,message:'Database package is not publishable/current: '+ref.id};
+    if(String(stored.source_commit||'').toLowerCase()!==releaseCommit||ref.sourceCommit!==releaseCommit)return {ok:false,message:'Database package source commit does not match the release: '+ref.component};
+    if(Number(stored.database_schema_version)!==ref.databaseSchemaVersion)return {ok:false,message:'Database package schema version reference mismatch: '+ref.component};
+    if(String(stored.package_sha256||'').toLowerCase()!==ref.sha256||!/^[a-f0-9]{64}$/.test(ref.sha256))return {ok:false,message:'Database package checksum reference mismatch: '+ref.component};
+    if(String(row?.release_type||'')==='base'&&String(stored.source_repo)!=='lucaskerim123/V1-vercel-base')return {ok:false,message:'Base database package has an invalid source repository.'};
+    if(String(row?.release_type||'')==='update'&&String(stored.source_repo)!=='lucaskerim123/V1-vercel-engine')return {ok:false,message:'Engine database package has an invalid source repository.'};
+  }
+  return {ok:true,message:`Database package set is complete and source-locked: ${required.join(', ')}.`,packages:refs};
+}
+
+export async function publishReleaseDatabasePackages(client:any,row:any,actorUserId?:string|null,actor?:string){
+  const validation=await validateReleaseDatabasePackages(row);
+  if(!validation.ok)throw new Error(validation.message);
+  const refs=validation.packages||[];
+  const published:any[]=[];
+  for(const ref of refs){
+    const candidate=(await client.query('select * from database_packages where id=$1 for update',[ref.id])).rows[0];
+    if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
+    if(!['candidate','current'].includes(String(candidate.status||'')))throw new Error('DATABASE_PACKAGE_NOT_PUBLISHABLE');
+    const newer=(await client.query(
+      "select 1 from database_packages where component=$1 and status='current' and database_schema_version>$2 and id<>$3 limit 1",
+      [candidate.component,candidate.database_schema_version,candidate.id]
+    )).rows[0];
+    if(newer)throw new Error('DATABASE_PACKAGE_VERSION_ROLLBACK');
+
+    await client.query(
+      "update database_packages set status='superseded',superseded_at=coalesce(superseded_at,now()) where component=$1 and status='current' and id<>$2",
+      [candidate.component,candidate.id]
+    );
+    const current=(await client.query(
+      "update database_packages set status='current',published_at=coalesce(published_at,now()),published_by=coalesce(published_by,$2),superseded_at=null where id=$1 returning id,component,database_schema_version,package_sha256,source_commit,status",
+      [candidate.id,actor??'release-publication']
+    )).rows[0];
+    published.push(current);
+  }
+  await client.query(
+    "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'database_package.release_publish','release',$3,$4)",
+    [actorUserId??null,actor??'admin',row.id,JSON.stringify({packages:published})]
+  );
+  return published;
+}

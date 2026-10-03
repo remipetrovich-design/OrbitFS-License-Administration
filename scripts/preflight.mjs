@@ -33,7 +33,12 @@ run("Clean locked dependency install", npm, ["ci"]);
 run("Whitespace / patch integrity", "git", ["diff", "--check"]);
 run("Lint", npm, ["run", "lint"]);
 run("Typecheck", npm, ["run", "typecheck"]);
-run("Dependency audit", npm, ["audit", "--audit-level=high"]);
+run("Production dependency audit", npm, ["audit", "--omit=dev", "--audit-level=high"]);
+console.log("\n=== Development dependency audit (informational) ===");
+const devAudit = spawnSync(npm, ["audit", "--include=dev", "--audit-level=high"], { stdio: "inherit", shell: false });
+if (devAudit.status !== 0) {
+  console.warn("Development dependency audit reported findings but does not block production preflight.");
+}
 run("Production build", npm, ["run", "build"]);
 
 console.log("\n=== Preflight PASSED ===");

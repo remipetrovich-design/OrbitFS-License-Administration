@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {integrationAuthorized} from '../../../../../lib/auth';
 import {db} from '../../../../../lib/db';
-import {archiveRelease,publishRelease,promoteRelease,createPresentationRevision,updateReleasePresentation,withdrawRelease,setReleaseReview,markReleaseRolledBack} from '../../../../../lib/core/releases';
+import {archiveRelease,publishRelease,promoteRelease,createPresentationRevision,updateReleasePresentation,withdrawRelease,setReleaseReview,markReleaseRolledBack,withAuthoritativeReleaseRuntimeAccess} from '../../../../../lib/core/releases';
 
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
   const auth=await integrationAuthorized(request,'releases.read');
@@ -9,7 +9,7 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
   const {id}=await params;
   const row=(await db().query("select r.*,p.slug product,p.name product_name from releases r join products p on p.id=r.product_id where r.id=$1 limit 1",[id])).rows[0];
   if(!row)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
-  return NextResponse.json({release:row});
+  return NextResponse.json({release:withAuthoritativeReleaseRuntimeAccess(row)});
 }
 export async function PATCH(request:Request,{params}:{params:Promise<{id:string}>}){
   const auth=await integrationAuthorized(request,'releases.write');

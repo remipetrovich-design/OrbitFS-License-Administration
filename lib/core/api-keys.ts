@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { db } from '../db';
 
-export type ApiScope = 'license.issue' | 'license.validate' | 'license.manage' | 'releases.read' | 'releases.write' | 'releases.control' | 'deployment.read' | 'deployment.write';
+export type ApiScope = 'license.issue' | 'license.validate' | 'license.manage' | 'releases.read' | 'releases.write' | 'releases.control' | 'deployment.read' | 'deployment.write' | 'database.packages.read' | 'database.packages.write' | 'database.packages.control';
 
 function hashKey(value: string) {
   return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
@@ -28,6 +28,8 @@ function scopeAllows(granted: ApiScope[], required: ApiScope) {
   if (granted.includes('releases.control') && ['releases.write', 'releases.read'].includes(required)) return true;
   if (granted.includes('releases.write') && required === 'releases.read') return true;
   if (granted.includes('deployment.write') && required === 'deployment.read') return true;
+  if (granted.includes('database.packages.control') && ['database.packages.write', 'database.packages.read'].includes(required)) return true;
+  if (granted.includes('database.packages.write') && required === 'database.packages.read') return true;
   return false;
 }
 
@@ -75,7 +77,7 @@ export async function authenticateApiKey(request: Request, requiredScope?: ApiSc
   // contract. This is a fallback only; UI-created API keys remain authoritative.
   if (envMachineKey(key)) {
     const controlToken = [process.env.BILLING_API_TOKEN, process.env.MASTER_API_TOKEN, process.env.INTEGRATION_API_TOKEN].filter(Boolean).some(candidate => candidate?.trim() === key);
-    const scopes: ApiScope[] = ['license.issue', 'license.validate', 'license.manage', 'releases.read', 'releases.write', ...(controlToken ? ['releases.control' as ApiScope] : []), 'deployment.read', 'deployment.write'];
+    const scopes: ApiScope[] = ['license.issue', 'license.validate', 'license.manage', 'releases.read', 'releases.write', ...(controlToken ? ['releases.control' as ApiScope] : []), 'deployment.read', 'deployment.write', 'database.packages.read', 'database.packages.write', ...(controlToken ? ['database.packages.control' as ApiScope] : [])];
     if (requiredScope && !scopeAllows(scopes, requiredScope)) return null;
     return { name: controlToken ? 'control-machine-token' : 'environment-machine-token', scopes };
   }

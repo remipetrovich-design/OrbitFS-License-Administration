@@ -8,8 +8,8 @@ export const runtime='nodejs';
 function requestIp(request:Request){return request.headers.get('x-real-ip')?.trim()||request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||null;}
 function entitlementKey(component:CustomerDatabaseComponent){return component==='base'?'orbitfs_base':component==='engine-shared'?null:'orbitfs_'+component;}
 
-export async function GET(request:Request,{params}:{params:Promise<{component:string}>}){
-  const {component:raw}=await params;
+export async function GET(request:Request,{params}:{params:Promise<{key:string}>}){
+  const {key:raw}=await params;
   const component=String(raw||'').trim().toLowerCase() as CustomerDatabaseComponent;
   if(!CUSTOMER_DATABASE_COMPONENTS.includes(component))return NextResponse.json({ok:false,code:'DATABASE_PACKAGE_COMPONENT_INVALID'},{status:400});
 

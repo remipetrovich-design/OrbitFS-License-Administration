@@ -59,16 +59,37 @@ async function authorized(request: Request) {
   // Bootstrap supplies one full host snapshot; component activation still obeys each entitlement in Base.
   return { licenseId: validation.license_id, installationId };
 }
-async function snapshot(pinned: string | null) {
+async function wasPreviouslyAuthorized(installationId: string, licenseId: string, sha: string) {
+  const result = await db().query(
+    `select 1
+       from audit_events
+      where action='engine.source.authorized'
+        and resource_type='installation'
+        and details->>'installation_id'=$1
+        and details->>'license_id'=$2
+        and lower(details->>'source_commit')=$3
+      limit 1`,
+    [installationId, licenseId, sha],
+  );
+  return Number(result.rowCount || 0) > 0;
+}
+function manifestVersion(fetched: Array<{ path: string; bytes: Buffer }>, component: string, fallback: string) {
+  const entry = fetched.find((item) => item.path === 'src/addons/' + component + '/manifest.ts');
+  if (!entry) return fallback;
+  const match = entry.bytes.toString('utf8').match(/\bversion\s*:\s*['"]([^'"]+)['"]/);
+  return String(match?.[1] || fallback);
+}
+async function snapshot(pinned: string | null, allowHistorical = false) {
   const repository = await github('');
   if (String(repository.id) !== '1358790703' || String(repository.full_name).toLowerCase() !== REPO.toLowerCase())
     throw Object.assign(new Error('Engine repository identity mismatch'), { code: 'ENGINE_SOURCE_IDENTITY_MISMATCH', status: 502 });
   const ref = await github('/git/ref/heads/' + BRANCH);
   const latest = String(ref.object?.sha || '').toLowerCase();
   if (!/^[a-f0-9]{40}$/.test(latest)) throw Object.assign(new Error('Invalid branch commit'), { code: 'ENGINE_SOURCE_SHA_INVALID', status: 502 });
-  // Never accept arbitrary customer-selected commits. A stale pinned descriptor must be re-planned.
-  if (pinned && pinned !== latest) throw Object.assign(new Error('Branch moved since planning'), { code: 'ENGINE_SOURCE_STALE', status: 409 });
-  const sha = latest;
+  // Current branch head is always eligible. Historical commits are eligible only when
+  // this same installation was previously authorized for that exact SHA.
+  if (pinned && pinned !== latest && !allowHistorical) throw Object.assign(new Error('Branch moved since planning'), { code: 'ENGINE_SOURCE_STALE', status: 409 });
+  const sha = pinned || latest;
   const tree = await github('/git/trees/' + sha + '?recursive=1');
   if (tree.truncated || !Array.isArray(tree.tree)) throw Object.assign(new Error('Incomplete source tree'), { code: 'ENGINE_SOURCE_TREE_INCOMPLETE', status: 502 });
   const invalidMigrations = tree.tree.filter((item: any) => item.type === 'blob' && /^supabase\/migrations\/(shared|apex|mcp|studio)\//.test(String(item.path || '')) && String(item.path).endsWith('.sql') && !MIGRATION.test(String(item.path)));
@@ -106,9 +127,10 @@ async function snapshot(pinned: string | null) {
   const packageJson = JSON.parse(fetched.find((entry) => entry.path === 'package.json')!.bytes.toString('utf8'));
   const version = String(packageJson.version || '0.0.0');
   const releaseId = 'github:' + REPO + '@' + sha;
+  const componentVersions = Object.fromEntries(COMPONENTS.map((component) => [component, manifestVersion(fetched, component, version)]));
   const packageData = {
     format: 'orbitfs-engine-release-v3', schemaVersion: 3, version, releaseId, sourceCommit: sha,
-    createdAt: '1970-01-01T00:00:00.000Z', components: COMPONENTS, componentVersions: Object.fromEntries(COMPONENTS.map((c) => [c, version])),
+    createdAt: '1970-01-01T00:00:00.000Z', components: COMPONENTS, componentVersions,
     checkpointRequired: true, minimumEngineDeployerProtocol: 1, minimumBaseVersion: '1.0.0', projectSettings: { framework: 'sveltekit', buildCommand: 'npm run build', installCommand: 'npm ci' },
     database: { format: 'orbitfs-db-migrations-v1', mode: 'shared-panel', provider: 'supabase', migrationCount: migrations.length, migrations },
     fileCount: files.length, files,
@@ -124,7 +146,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const pinned = url.searchParams.get('sha')?.toLowerCase() || null;
     if (pinned && !/^[a-f0-9]{40}$/.test(pinned)) return reply('ENGINE_SOURCE_SHA_INVALID', 400);
-    const result = await snapshot(pinned);
+    const allowHistorical = pinned ? await wasPreviouslyAuthorized(String(grant.installationId), String(grant.licenseId), pinned) : false;
+    const result = await snapshot(pinned, allowHistorical);
     await db().query(
       "insert into audit_events(actor,action,resource_type,details) values($1,'engine.source.authorized','installation',$2)",
       ['engine-bootstrap', JSON.stringify({ installation_id: grant.installationId, license_id: grant.licenseId, source_commit: result.sha, downloaded: url.searchParams.get('download') === '1' })],

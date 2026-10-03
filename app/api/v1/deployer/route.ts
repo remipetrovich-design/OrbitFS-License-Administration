@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {integrationAuthorized} from '../../../../lib/auth';
 import {db} from '../../../../lib/db';
-import {recordInstallationCheckIn} from '../../../../lib/core/licenses';
+import {generateInstallationCredential,hashLicenseCredential,recordInstallationCheckIn} from '../../../../lib/core/licenses';
 import {compareOrbitReleaseVersions} from '../../../../lib/core/versioning';
 
 function requestIp(request:Request){return request.headers.get('x-real-ip')?.trim()||request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||null;}
@@ -48,6 +48,36 @@ export async function POST(request:Request){
   const installationId=String(body?.installationId||body?.installation_id||'').trim();
   const rollbackScope=String(body?.rollbackScope||body?.rollback_scope||'base').trim().toLowerCase();
   const updateRollback=action==='rollback'&&rollbackScope==='update';
+  if(action==='register_runtime'){
+    const licenseId=String(body?.licenseId||body?.license_id||'').trim();
+    if(!installationId)return NextResponse.json({ok:false,code:'INSTALLATION_ID_REQUIRED'},{status:400});
+    if(!licenseId)return NextResponse.json({ok:false,code:'LICENSE_ID_REQUIRED'},{status:400});
+    const settings=(await db().query('select system_enabled,licensing_enabled,maintenance_mode,validation_ttl_seconds,offline_grace_seconds,pulse_poll_seconds,max_failed_validations,allow_offline_grace,pulse_revision,pulse_at,pulse_reason from system_settings where id=true')).rows[0];
+    if(!settings?.system_enabled||!settings?.licensing_enabled||settings?.maintenance_mode)return NextResponse.json({ok:false,code:'AUTHORITY_UNAVAILABLE'},{status:503});
+    const license=(await db().query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component,p.status product_status from licenses l join products p on p.id=l.product_id where l.id=$1 limit 1`,[licenseId])).rows[0];
+    if(!license||license.component!=='orbitfs_base'||license.product_status!=='active')return NextResponse.json({ok:false,code:'LICENSE_NOT_ELIGIBLE'},{status:403});
+    if(license.status!=='active'||(license.expires_at&&new Date(license.expires_at).getTime()<=Date.now()))return NextResponse.json({ok:false,code:'LICENSE_NOT_ELIGIBLE'},{status:403});
+    const rotationRequired=license.metadata&&typeof license.metadata==='object'&&license.metadata.base_reinstall_rotation_required&&typeof license.metadata.base_reinstall_rotation_required==='object'?license.metadata.base_reinstall_rotation_required:null;
+    if(rotationRequired)return NextResponse.json({ok:false,code:'LICENSE_ROTATION_REQUIRED'},{status:409});
+    const client=await db().connect();
+    try{
+      await client.query('BEGIN');
+      await client.query('select pg_advisory_xact_lock(hashtext($1))',[licenseId]);
+      const reserved=(await client.query(`select installation_id from activations where license_id=$1 and installation_id<>$2 and status='active' order by last_seen_at desc limit 1`,[licenseId,installationId])).rows[0];
+      if(reserved){await client.query('ROLLBACK');return NextResponse.json({ok:false,code:'INSTALLATION_LIMIT_REACHED'},{status:403});}
+      const credential=generateInstallationCredential(),credentialHash=hashLicenseCredential(credential);
+      const policy=license.metadata&&typeof license.metadata==='object'&&license.metadata.license_policy&&typeof license.metadata.license_policy==='object'?license.metadata.license_policy:{};
+      const raw=policy.components&&typeof policy.components==='object'?policy.components:{};
+      const components:any={orbitfs_base:{state:'active',allowed:true,lockedToThisInstallation:true,reason:null}};
+      for(const id of ['orbitfs_mcp','orbitfs_apex','orbitfs_studio'])components[id]=raw[id]===true?{state:'locked',allowed:true,lockedToThisInstallation:true,reason:null}:{state:'blocked',allowed:false,lockedToThisInstallation:false,reason:'not_included'};
+      const metadata={runtime_credential_hash:credentialHash,runtime_credential_type:'installation_scoped',runtime_credential_issued_at:new Date().toISOString(),registered_by:'deployer'};
+      await client.query(`insert into activations(license_id,installation_id,product_version,status,metadata,current_components) values($1,$2,$3,'active',$4,$5) on conflict(license_id,installation_id) do update set status='active',last_seen_at=now(),product_version=coalesce(excluded.product_version,activations.product_version),metadata=coalesce(activations.metadata,'{}'::jsonb)||excluded.metadata,current_components=excluded.current_components`,[licenseId,installationId,body?.productVersion||body?.product_version||null,JSON.stringify(metadata),JSON.stringify(components)]);
+      await client.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values(null,$1,'installation.runtime_credential','license',$2,$3)`,[actor.actor||'deployer',licenseId,JSON.stringify({installation_id:installationId,credential_type:'installation_scoped'})]);
+      await client.query('COMMIT');
+      const runtime_policy={validation_ttl_seconds:Number(settings.validation_ttl_seconds||60),offline_grace_seconds:Number(settings.offline_grace_seconds||0),pulse_poll_seconds:Number(settings.pulse_poll_seconds||15),max_failed_validations:Number(settings.max_failed_validations||3),allow_offline_grace:Boolean(settings.allow_offline_grace),pulse_revision:Number(settings.pulse_revision||0),pulse_at:settings.pulse_at??null,pulse_reason:settings.pulse_reason??null,provider_outage_freeze_enabled:true,manual_authority_offline_uses_grace:true,freeze_grace_on_provider_failure:true,freeze_failure_counter_on_provider_failure:true};
+      return NextResponse.json({ok:true,authority:'orbitfs-license-master-v2',licenseId,installationId,runtimeCredential:credential,keyHint:'••••'+credential.slice(-4),expiresAt:license.expires_at??null,runtimePolicy:runtime_policy,components});
+    }catch(error){try{await client.query('ROLLBACK')}catch{}throw error}finally{client.release()}
+  }
   if(phase==='sync')return NextResponse.json({ok:false,code:'CUSTOMER_DEPLOYER_EXECUTION_REQUIRED',error:'Provider status checks are executed by the customer deployer; License Manager does not accept customer provider credentials.'},{status:409});
   if(!releaseId)return NextResponse.json({ok:false,code:'RELEASE_ID_REQUIRED'},{status:400});
   if(!['deploy','base_update','update','redeploy','rollback'].includes(action))return NextResponse.json({ok:false,code:'UNSUPPORTED_DEPLOYMENT_ACTION'},{status:400});
@@ -78,7 +108,7 @@ export async function POST(request:Request){
   if(!release.checksum)return NextResponse.json({ok:false,code:'RELEASE_ARTIFACT_NOT_VERIFIED'},{status:409});
   const licenseId=String(body?.licenseId||body?.license_id||'').trim();
   if(!licenseId)return NextResponse.json({ok:false,code:'LICENSE_ID_REQUIRED',error:'No authoritative licence id was supplied for this installation.'},{status:403});
-  const license=(await db().query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component from licenses l join products p on p.id=l.product_id where l.id=$1 and l.product_id=($2::uuid) limit 1`,[licenseId,release.product_id])).rows[0];
+  const license=(await db().query(`select l.id,l.status,l.expires_at,l.metadata,l.customer_external_id,p.slug component from licenses l join products p on p.id=l.product_id where l.id=$1 and l.product_id=($2::uuid) limit 1`,[licenseId,release.product_id])).rows[0];
   if(!license)return NextResponse.json({ok:false,code:'LICENSE_NOT_ELIGIBLE_FOR_RELEASE',error:'The installation licence does not belong to this release product.'},{status:403});
   if(license.status!=='active')return NextResponse.json({ok:false,code:'LICENSE_NOT_ELIGIBLE_FOR_RELEASE',error:`The installation licence is ${license.status||'inactive'}; an active licence is required.`},{status:403});
   if(license.expires_at&&new Date(license.expires_at).getTime()<=Date.now())return NextResponse.json({ok:false,code:'LICENSE_NOT_ELIGIBLE_FOR_RELEASE',error:'The installation licence has expired.'},{status:403});
@@ -87,12 +117,14 @@ export async function POST(request:Request){
   let currentBase:any=null;
   if(installationId){
     activation=(await db().query('select id,status,product_version,last_deployment_id,last_deployment_url from activations where license_id=$1 and installation_id=$2 limit 1',[licenseId,installationId])).rows[0];
+    const customerReference=String(license.customer_external_id||'').trim();
     currentBase=(await db().query(
-      "select release_id,product_version,project_id,project_name,deployment_id,deployment_url,created_at from deployment_events where license_id=$1 and installation_id=$2 and phase='completed' and action in ('deploy','base_update','redeploy','rollback') and coalesce(details->>'rollbackScope','base')='base' order by created_at desc limit 1",
-      [licenseId,installationId]
+      "select license_id,release_id,product_version,project_id,project_name,deployment_id,deployment_url,customer_identity,created_at from deployment_events where installation_id=$1 and phase='completed' and action in ('deploy','base_update','redeploy','rollback') and coalesce(details->>'rollbackScope','base')='base' and (license_id=$2 or ($3<>'' and lower(coalesce(customer_identity->>'customerNumber',''))=lower($3))) order by created_at desc limit 1",
+      [installationId,licenseId,customerReference]
     )).rows[0]||null;
-    // Runtime key activation and deployment entitlement are separate concerns.
-    // Deployment continuity is proven by this licence's authoritative deployment history.
+    // Runtime licence rotation must not erase an installation's deployment history.
+    // A historical event from another licence is accepted only when its recorded
+    // Billing customer number matches the current authoritative licence customer.
   }
 
   const publishedApproved=release.status==='published'&&release.review_status==='approved'&&!release.archived_at;
@@ -104,8 +136,8 @@ export async function POST(request:Request){
   }else if(action==='rollback'){
     if(release.review_status!=='approved'||!installationId)return NextResponse.json({ok:false,code:'BASE_ROLLBACK_NOT_AUTHORIZED'},{status:409});
     const prior=(await db().query(
-      "select 1 from deployment_events where license_id=$1 and installation_id=$2 and release_id=$3 and phase='completed' and action in ('deploy','base_update','redeploy','rollback') and coalesce(details->>'rollbackScope','base')='base' limit 1",
-      [licenseId,installationId,release.id]
+      "select 1 from deployment_events where installation_id=$1 and release_id=$2 and phase='completed' and action in ('deploy','base_update','redeploy','rollback') and coalesce(details->>'rollbackScope','base')='base' and (license_id=$3 or ($4<>'' and lower(coalesce(customer_identity->>'customerNumber',''))=lower($4))) limit 1",
+      [installationId,release.id,licenseId,String(license.customer_external_id||'').trim()]
     )).rows[0];
     if(!prior)return NextResponse.json({ok:false,code:'BASE_ROLLBACK_TARGET_NOT_INSTALLED'},{status:409});
   }else if(action==='base_update'){

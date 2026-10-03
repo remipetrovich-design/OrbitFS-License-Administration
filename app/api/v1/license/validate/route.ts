@@ -137,12 +137,24 @@ export async function POST(request: Request) {
         runtime_policy: (result as any).runtime_policy ?? null,
         pulse_revision: (result as any).runtime_policy?.pulse_revision ?? null,
         pulse_at: (result as any).runtime_policy?.pulse_at ?? null,
+        authority_reason: (result as any).authority_reason ?? (result as any).runtime_policy?.authority_reason ?? null,
+        provider_outage: Boolean((result as any).provider_outage),
+        grace_action: (result as any).grace_action ?? 'normal',
+        failure_counter_action: (result as any).failure_counter_action ?? 'normal',
       },
       { status: result.status },
     );
   } catch (error: any) {
     const requestId = crypto.randomUUID();
     console.error('license validation failed', { requestId, error });
-    return NextResponse.json({ valid: false, code: 'SERVER_ERROR', request_id: requestId }, { status: 500 });
+    return NextResponse.json({
+      valid: false,
+      code: 'SERVER_ERROR',
+      request_id: requestId,
+      authority_reason: 'provider_failure',
+      provider_outage: true,
+      grace_action: 'freeze',
+      failure_counter_action: 'freeze',
+    }, { status: 500, headers: { 'cache-control': 'no-store' } });
   }
 }

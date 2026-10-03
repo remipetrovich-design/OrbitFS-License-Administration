@@ -8,6 +8,7 @@ create table if not exists system_settings (
   maintenance_mode boolean not null default false,
   customer_self_unlock_enabled boolean not null default true,
   release_system_enabled boolean not null default true,
+  auto_technical_approval_enabled boolean not null default true,
   deployment_enabled boolean not null default true,
   validation_ttl_seconds integer not null default 60,
   offline_grace_seconds integer not null default 0,
@@ -73,6 +74,7 @@ create or replace function touch_updated_at() returns trigger language plpgsql a
 drop trigger if exists users_touch on users;create trigger users_touch before update on users for each row execute function touch_updated_at();drop trigger if exists products_touch on products;create trigger products_touch before update on products for each row execute function touch_updated_at();drop trigger if exists licenses_touch on licenses;create trigger licenses_touch before update on licenses for each row execute function touch_updated_at();
 alter table releases add column if not exists manifest jsonb not null default '{}'::jsonb;
 alter table system_settings add column if not exists release_system_enabled boolean not null default true;
+alter table system_settings add column if not exists auto_technical_approval_enabled boolean not null default true;
 alter table system_settings add column if not exists deployment_enabled boolean not null default true;
 alter table system_settings add column if not exists validation_ttl_seconds integer not null default 60;
 alter table system_settings add column if not exists offline_grace_seconds integer not null default 0;
