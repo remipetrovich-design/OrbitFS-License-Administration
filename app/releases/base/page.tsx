@@ -90,7 +90,7 @@ export default async function BaseDeployment() {
             releases.map((r: any) => {
               const v = validation(r);
               const attempts = Array.isArray(r.manifest?.build_attempts) ? r.manifest.build_attempts : [];
-              const latestAttempt = Math.max(Number(r.manifest?.latest_attempt || 0), ...attempts.map((item: any) => Number(item?.attempt || 0)), 1);
+              const latestAttempt = Math.max(Number(r.revision || 1), Number(r.manifest?.latest_attempt || 0), ...attempts.map((item: any) => Number(item?.attempt || 0)), 1);
               const archived = Boolean(r.archived_at);
               const state = archived ? 'archived' : r.status === 'published' ? 'published' : v.status === 'failed' || r.review_status === 'rejected' ? 'blocked' : r.review_status === 'approved' ? 'ready' : v.status === 'passed' ? 'validated' : 'needs validation';
               return <article className={archived ? 'release-item release-item-archived' : 'release-item'} data-row data-filter={`${r.review_status} ${r.status}`} data-search={`${r.version} ${r.channel} ${r.status} ${r.review_status} ${v.status} ${r.source_repo || ''} ${r.source_ref || ''} ${r.source_sha || ''}`} key={r.id}>
