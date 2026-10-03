@@ -116,8 +116,19 @@ jobs:
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=1&teamId=$VERCEL_ORG_ID")"
           deployed_sha="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubCommitSha // empty')"
+          deployed_org="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubOrg // empty')"
+          deployed_repo="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubRepo // empty')"
           deployed_url="$(printf '%s' "$response" | jq -r '.deployments[0].url // empty')"
+          deployed_repository=""
+          if [ -n "$deployed_org" ] && [ -n "$deployed_repo" ]; then
+            deployed_repository="$deployed_org/$deployed_repo"
+          fi
+          case "$deployed_repository" in
+            ""|lucaskerim123/Custom-licence-manager|remipetrovich-design/OrbitFS-License-Administration) ;;
+            *) echo "::error::Unexpected previous production repository: $deployed_repository"; exit 1 ;;
+          esac
           echo "deployed_sha=$deployed_sha" >> "$GITHUB_OUTPUT"
+          echo "deployed_repository=$deployed_repository" >> "$GITHUB_OUTPUT"
           if [ -n "$deployed_url" ]; then
             echo "deployment_url=https://$deployed_url" >> "$GITHUB_OUTPUT"
           fi
@@ -134,6 +145,7 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         env:
           RELEASE_BASE_SHA: ${{ steps.production_state.outputs.deployed_sha }}
+          RELEASE_BASE_REPOSITORY: ${{ steps.production_state.outputs.deployed_repository }}
         run: node scripts/release-manifest.mjs
 
       - name: Upload release/change-set manifest
