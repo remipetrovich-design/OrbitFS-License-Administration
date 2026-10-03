@@ -806,19 +806,15 @@ export async function setReleaseReview(id:string,reviewStatus:'approved'|'reject
     row.source_sha,row.artifact_name,row.artifact_repo,row.artifact_run_id,row.vercel_ready,row.supabase_ready,row.customer_publication_repo,
     manifest,nextRevision,row.id]
   )).rows[0];
-  const archived=(await pool.query(
-   'update releases set archived_at=$2,archived_by=$3 where id=$1 returning *',
-   [returned.id,now,actorUserId??null]
-  )).rows[0];
   await pool.query(
    `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
     values($1,$2,'release.review','release',$3,$4)`,
-   [actorUserId??null,actor??'admin',archived.id,JSON.stringify({
+   [actorUserId??null,actor??'admin',returned.id,JSON.stringify({
     review_status:'rejected',reason:reasonText,handed_back_to_dev:true,
     returned_from_release_id:row.id,previously_published:true,revision:nextRevision
    })]
   );
-  return archived;
+  return returned;
  }
 
  const manifest={...(row.manifest||{})};
@@ -830,11 +826,11 @@ export async function setReleaseReview(id:string,reviewStatus:'approved'|'reject
  const result=await pool.query(
   `update releases set review_status=$2,
     status=case when $2='rejected' then 'draft' when status='disabled' then 'draft' else status end,
-    archived_at=case when $2='rejected' then coalesce(archived_at,$3) else archived_at end,
-    archived_by=case when $2='rejected' then coalesce(archived_by,$4) else archived_by end,
-    manifest=$5
+    archived_at=case when $2='rejected' then null else archived_at end,
+    archived_by=case when $2='rejected' then null else archived_by end,
+    manifest=$3
    where id=$1 returning *`,
-  [id,reviewStatus,now,actorUserId??null,manifest]
+  [id,reviewStatus,manifest]
  );
  if(!result.rows[0])return null;
  await pool.query(
