@@ -169,21 +169,29 @@ export async function POST(request:Request){
     }
   }
   const releaseManifest=release.manifest&&typeof release.manifest==='object'?release.manifest:{};
-  const releaseComponents:string[]=[...new Set<string>((Array.isArray(releaseManifest.components)?releaseManifest.components:[])
+  const updatePath=action==='update'||updateRollback;
+  const rawReleaseComponents:string[]=[...new Set<string>((Array.isArray(releaseManifest.components)?releaseManifest.components:[])
     .map((value:any)=>String(value||'').trim().toLowerCase())
-    .filter((value:string)=>['base','apex','mcp','studio'].includes(value)))];
+    .map((value:string)=>value==='orbitfs_mcp'?'mcp':value==='orbitfs_apex'?'apex':value==='orbitfs_studio'?'studio':value==='orbitfs_base'||value==='core'?'base':value)
+    .filter(Boolean))];
+  if(updatePath&&rawReleaseComponents.some((component:string)=>!['apex','mcp','studio'].includes(component))){
+    return NextResponse.json({ok:false,code:'UPDATE_SCOPE_INVALID',error:'Normal Update releases may target only MCP, APEX and Studio. Base must use the Base Deployer/Updater.'},{status:409});
+  }
+  const releaseComponents:string[]=updatePath
+    ?rawReleaseComponents.filter((component:string)=>['apex','mcp','studio'].includes(component))
+    :rawReleaseComponents.filter((component:string)=>component==='base');
   const policy=license.metadata&&typeof license.metadata==='object'&&license.metadata.license_policy&&typeof license.metadata.license_policy==='object'
     ?license.metadata.license_policy:{};
   const entitlementMap=policy.components&&typeof policy.components==='object'?policy.components:{};
   const licenseComponent=String(license.component||'').trim().toLowerCase();
-  const entitledComponents:string[]=['base','apex','mcp','studio'].filter((component:string)=>{
+  const entitledComponents:string[]=(updatePath?['apex','mcp','studio']:['base']).filter((component:string)=>{
     if(component==='base')return licenseComponent==='orbitfs_base'||Boolean(entitlementMap.orbitfs_base);
     return Boolean(entitlementMap['orbitfs_'+component]);
   });
-  const executionComponents=action==='update'||updateRollback
+  const executionComponents=updatePath
     ?releaseComponents.filter((component:string)=>entitledComponents.includes(component))
     :releaseComponents;
-  const skippedComponents=(action==='update'||updateRollback)
+  const skippedComponents=updatePath
     ?releaseComponents.filter((component:string)=>!executionComponents.includes(component))
     :[];
   const componentPlan={releaseComponents,entitledComponents,executionComponents,skippedComponents};
