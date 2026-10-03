@@ -69,7 +69,7 @@ export async function authenticateApiKey(request: Request, requiredScope?: ApiSc
     if (client.status !== 'active') return null;
     const scopes = parseScopes(client.scopes);
     if (requiredScope && !scopeAllows(scopes, requiredScope)) return null;
-    await db().query(`update api_keys set last_used_at=now() where id=$1`, [client.id]);
+    // last_used_at is retained for compatibility but no longer written on every machine request.
     return { ...client, scopes };
   }
 
