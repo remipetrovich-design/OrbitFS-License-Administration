@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const REPO = 'lucaskerim123/V1-vercel-engine';
+const REPO = 'remipetrovich-design/OrbitFS_Engine';
 const BRANCH = 'UPDATE_RELEASE';
 const MAX_FILES = 5000;
 const MAX_UNPACKED = 210 * 1024 * 1024;
@@ -81,7 +81,7 @@ function manifestVersion(fetched: Array<{ path: string; bytes: Buffer }>, compon
 }
 async function snapshot(pinned: string | null, allowHistorical = false) {
   const repository = await github('');
-  if (String(repository.id) !== '1358790703' || String(repository.full_name).toLowerCase() !== REPO.toLowerCase())
+  if (String(repository.id) !== '1393749443' || String(repository.full_name).toLowerCase() !== REPO.toLowerCase())
     throw Object.assign(new Error('Engine repository identity mismatch'), { code: 'ENGINE_SOURCE_IDENTITY_MISMATCH', status: 502 });
   const ref = await github('/git/ref/heads/' + BRANCH);
   const latest = String(ref.object?.sha || '').toLowerCase();
