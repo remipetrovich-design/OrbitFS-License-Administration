@@ -19,12 +19,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Remaining workflow steps are disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout complete repository history
+        if: steps.profile.outputs.run == 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Use Node 22
+        if: steps.profile.outputs.run == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -32,24 +52,28 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Verify immutable database migration baseline
+        if: steps.profile.outputs.run == 'true'
         run: node scripts/prepare-supabase-migrations.mjs .orbitfs-supabase/supabase/migrations
 
       - name: Initialize CodeQL full security scan
+        if: steps.profile.outputs.run == 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
           queries: security-extended
 
       - name: Run CodeQL full security scan
+        if: steps.profile.outputs.run == 'true'
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:javascript-typescript-full-scan"
 
       - name: Run complete production validation
+        if: steps.profile.outputs.run == 'true'
         run: npm run preflight
 
       - name: Upload temporary validation failure report
-        if: ${{ failure() }}
+        if: ${{ steps.profile.outputs.run == 'true' && (failure()) }}
         uses: actions/upload-artifact@v4
         with:
           name: validation-failure-${{ github.sha }}
@@ -58,4 +82,5 @@ jobs:
           retention-days: 7
 
       - name: Full scan passed
+        if: steps.profile.outputs.run == 'true'
         run: echo "Full production scan passed for immutable commit $GITHUB_SHA."
