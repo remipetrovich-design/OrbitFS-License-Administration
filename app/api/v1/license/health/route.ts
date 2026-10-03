@@ -36,9 +36,9 @@ export async function GET() {
       pulse_at: settings?.pulse_at??null,
       pulse_reason: settings?.pulse_reason??null,
       runtime_policy: {
-        validation_ttl_seconds:Number(settings?.validation_ttl_seconds||60),
+        validation_ttl_seconds:Number(settings?.validation_ttl_seconds||5400),
         offline_grace_seconds:Number(settings?.offline_grace_seconds||0),
-        pulse_poll_seconds:Number(settings?.pulse_poll_seconds||15),
+        pulse_poll_seconds:Number(settings?.pulse_poll_seconds||5400),
         max_failed_validations:Number(settings?.max_failed_validations||3),
         allow_offline_grace:Boolean(settings?.allow_offline_grace),
       },
