@@ -45,7 +45,7 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
         return NextResponse.json({error:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',code:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',status:release.status,message:'Published release history is retained for rollback and audit. Only never-published release attempts can be permanently deleted.'},{status:409});
       }
       const deleted=(await db().query('delete from releases where id=$1 returning *',[id])).rows[0];
-      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${control.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:null,permanent:true,never_published:true,reason:body.reason?String(body.reason):null})]);
+      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${auth.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:null,permanent:true,never_published:true,reason:body.reason?String(body.reason):null})]);
       return NextResponse.json({deleted:true,id,previous_status:deleted.status,never_published:true});
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Release delete failed',code:'RELEASE_DELETE_FAILED'},{status:400});}
   }
