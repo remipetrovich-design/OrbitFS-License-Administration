@@ -168,7 +168,7 @@ export default async function Settings(){
  ];
 
  const masterEnabled=Boolean(s.system_enabled);
- const githubProfile:String='primary'===String(s.github_profile||'fallback').toLowerCase()?'primary':'fallback';
+ const githubProfile=(String(s.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback') as 'primary'|'fallback';
  const maintenance=masterEnabled&&Boolean(s.maintenance_mode);
  const deploymentEnabled=masterEnabled&&Boolean(s.deployment_enabled);
  const effectiveEnabled=(field:string,configured:boolean)=>{
