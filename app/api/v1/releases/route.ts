@@ -25,13 +25,15 @@ export async function POST(request:Request){
     if(!product)return NextResponse.json({error:'PRODUCT_NOT_FOUND'},{status:404});
     const releaseType=String(body.release_type||body.releaseType||'update').trim().toLowerCase();
     if(!['base','update'].includes(releaseType))return NextResponse.json({error:'INVALID_RELEASE_TYPE'},{status:400});
+    const sourceRepo=String(body.source_repo??body.sourceRepo??'').trim();
+    const defaultCustomerPublicationRepo=sourceRepo.startsWith('remipetrovich-design/')?'remipetrovich-design/OrbitFS-Billing-Shopfront':'lucaskerim123/V2_Billing_Store';
     const row=await createRelease({
       productId:product.id,channel:String(body.channel||'stable').trim().toLowerCase(),version:String(body.version||'').trim(),releaseType:releaseType as 'base'|'update',
-      sourceRepo:body.source_repo??body.sourceRepo??null,sourceRef:body.source_ref??body.sourceRef??null,sourceSha:body.source_sha??body.sourceCommit??null,
+      sourceRepo:sourceRepo||null,sourceRef:body.source_ref??body.sourceRef??null,sourceSha:body.source_sha??body.sourceCommit??null,
       artifactUrl:body.artifact_url??body.artifactUrl??null,artifactName:body.artifact_name??body.artifactName??null,artifactRepo:body.artifact_repo??body.artifactRepo??null,
       artifactRunId:body.artifact_run_id??body.artifactRunId??null,checksum:body.checksum??body.sha256??null,notes:body.changelog??body.notes??null,
       vercelReady:Boolean(body.vercel_ready??body.vercelReady),supabaseReady:Boolean(body.supabase_ready??body.supabaseReady),
-      customerPublicationRepo:body.customer_publication_repo??body.customerPublicationRepo??'lucaskerim123/V2_Billing_Store',
+      customerPublicationRepo:body.customer_publication_repo??body.customerPublicationRepo??defaultCustomerPublicationRepo,
       manifest:body.manifest&&typeof body.manifest==='object'?body.manifest:{},reviewStatus:'pending',deploymentStatus:'not_started',actor:`api:${auth.name}`
     });
     return NextResponse.json({ok:true,release:row,release_id:row.id});
