@@ -298,13 +298,25 @@ async function scanPackage(row:any,bytes:Buffer){
         String(recordSettings.framework||'')===String(packageSettings.framework||'')
         &&String(recordSettings.installCommand||'')===String(packageSettings.installCommand||'')
         &&String(recordSettings.buildCommand||'')===String(packageSettings.buildCommand||'');
+      const packageRuntimeOwnership=pkg.runtimeOwnership&&typeof pkg.runtimeOwnership==='object'&&!Array.isArray(pkg.runtimeOwnership)?pkg.runtimeOwnership:{};
+      const recordRuntimeOwnership=recordManifest.runtimeOwnership&&typeof recordManifest.runtimeOwnership==='object'&&!Array.isArray(recordManifest.runtimeOwnership)?recordManifest.runtimeOwnership:{};
+      const expectedExcludedTargets=['apex','mcp','studio'];
+      const runtimeOwnershipOk=
+        String(packageRuntimeOwnership.base||'')==='base-deployer-updater'
+        &&String(packageRuntimeOwnership.innerDeployer||'')==='base'
+        &&String(packageRuntimeOwnership.engineUpdaterExecutor||'')==='base-inner-deployer-v1'
+        &&Array.isArray(packageRuntimeOwnership.excludedUpdateTargets)
+        &&[...packageRuntimeOwnership.excludedUpdateTargets].map(String).sort().join(',')===expectedExcludedTargets.slice().sort().join(',');
+      const runtimeOwnershipHandoffMatches=JSON.stringify(recordRuntimeOwnership)===JSON.stringify(packageRuntimeOwnership);
       const handoffMatches=String(recordManifest.format||'')===String(pkg.format||'')
         &&Number(recordManifest.schemaVersion||0)===Number(pkg.schemaVersion||0)
         &&Number(recordManifest.fileCount||0)===Number(pkg.fileCount||0)
         &&Number(pkg.fileCount||0)===files.length
         &&packageComponents.join(',')===recordComponents.join(',')
-        &&projectSettingsMatch;
-      checks.push({key:'package_base_handoff',ok:handoffMatches,message:handoffMatches?'License Manager handoff metadata matches the embedded Base package manifest.':'License Manager handoff metadata must match the embedded Base package format, schema version, file count, components and project settings.'});
+        &&projectSettingsMatch
+        &&runtimeOwnershipHandoffMatches;
+      checks.push({key:'package_base_handoff',ok:handoffMatches,message:handoffMatches?'License Manager handoff metadata matches the embedded Base package manifest.':'License Manager handoff metadata must match the embedded Base package format, schema version, file count, components, runtime ownership and project settings.'});
+      checks.push({key:'package_base_runtime_ownership',ok:runtimeOwnershipOk,message:runtimeOwnershipOk?'Base owns the Base Deployer/Updater and inner deployer; normal Updates are reserved for MCP/APEX/Studio through that inner deployer.':'Base release must declare Base/inner-deployer ownership and exclude MCP/APEX/Studio from the Base release path.'});
       checks.push({key:'package_base_format',ok:pkg.format==='orbitfs-base-deployment-v2'&&Number(pkg.schemaVersion)===2,message:pkg.format==='orbitfs-base-deployment-v2'&&Number(pkg.schemaVersion)===2?'Base artifact uses orbitfs-base-deployment-v2.':'Base artifact must use orbitfs-base-deployment-v2 package schema 2.'});
       checks.push({key:'database_schema_version',ok:Boolean(packageDatabaseSchema&&releaseDatabaseSchema&&packageDatabaseSchema===releaseDatabaseSchema),message:packageDatabaseSchema&&releaseDatabaseSchema&&packageDatabaseSchema===releaseDatabaseSchema?`Base database schema version ${packageDatabaseSchema} is consistent.`:'Base artifact and release record must declare the same databaseSchemaVersion.'});
       checks.push({key:'database_migration_chain',ok:migrationChainOk,message:migrationChainOk?`Base artifact contains ${migrationChain.rows.length} verified migration file(s) through ${latestMigration}.`:'Base artifact migration files must exactly match databaseMigrationCount/databaseLatestMigration and pass size/SHA-256 verification.'});
