@@ -16,7 +16,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Remaining workflow steps are disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
       - name: Read one-shot deployment request
+        if: steps.profile.outputs.run == 'true'
         id: request
         shell: bash
         run: |
@@ -36,7 +54,7 @@ jobs:
           cat /tmp/request.env >> "$GITHUB_OUTPUT"
 
       - name: Dispatch V2 Billing Store production deployment
-        if: steps.request.outputs.TARGET == 'v2' || steps.request.outputs.TARGET == 'both'
+        if: ${{ steps.profile.outputs.run == 'true' && (steps.request.outputs.TARGET == 'v2' || steps.request.outputs.TARGET == 'both') }}
         env:
           GITHUB_ACTIONS_TOKEN: ${{ secrets.GITHUB_ACTIONS_TOKEN }}
         run: |
@@ -50,7 +68,7 @@ jobs:
             -d '{"ref":"main"}'
 
       - name: Dispatch License Manager production deployment
-        if: steps.request.outputs.TARGET == 'lm' || steps.request.outputs.TARGET == 'both'
+        if: ${{ steps.profile.outputs.run == 'true' && (steps.request.outputs.TARGET == 'lm' || steps.request.outputs.TARGET == 'both') }}
         env:
           GITHUB_ACTIONS_TOKEN: ${{ secrets.GITHUB_ACTIONS_TOKEN }}
         run: |
@@ -64,6 +82,7 @@ jobs:
             -d '{"ref":"main"}'
 
       - name: Record one-shot request
+        if: steps.profile.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET: ${{ steps.request.outputs.TARGET }}
