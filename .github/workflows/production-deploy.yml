@@ -103,7 +103,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Resolve previous production deployment
+      - name: Resolve previous production deployment for this repository
         if: steps.profile.outputs.deploy == 'true'
         id: production_state
         shell: bash
@@ -114,30 +114,28 @@ jobs:
           test -n "$VERCEL_PROJECT_ID"
           response="$(curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
-            "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=1&teamId=$VERCEL_ORG_ID")"
-          deployed_sha="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubCommitSha // empty')"
-          deployed_org="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubOrg // empty')"
-          deployed_repo="$(printf '%s' "$response" | jq -r '.deployments[0].meta.githubRepo // empty')"
-          deployed_url="$(printf '%s' "$response" | jq -r '.deployments[0].url // empty')"
-          deployed_repository=""
-          if [ -n "$deployed_org" ] && [ -n "$deployed_repo" ]; then
-            deployed_repository="$deployed_org/$deployed_repo"
-          fi
-          case "$deployed_repository" in
-            ""|lucaskerim123/Custom-licence-manager|remipetrovich-design/OrbitFS-License-Administration) ;;
-            *) echo "::error::Unexpected previous production repository: $deployed_repository"; exit 1 ;;
-          esac
+            "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&target=production&state=READY&limit=100&teamId=$VERCEL_ORG_ID")"
+          repo_row="$(printf '%s' "$response" | jq -c --arg repo "$GITHUB_REPOSITORY" '
+            [.deployments[]? | select((((.meta.githubOrg // "") + "/" + (.meta.githubRepo // "")) == $repo))][0] // empty
+          ')"
+          current_row="$(printf '%s' "$response" | jq -c '.deployments[0] // empty')"
+          deployed_sha="$(printf '%s' "$repo_row" | jq -r '.meta.githubCommitSha // empty')"
+          deployed_url="$(printf '%s' "$repo_row" | jq -r '.url // empty')"
+          current_sha="$(printf '%s' "$current_row" | jq -r '.meta.githubCommitSha // empty')"
+          current_repository="$(printf '%s' "$current_row" | jq -r '((.meta.githubOrg // "") + "/" + (.meta.githubRepo // ""))')"
+          current_url="$(printf '%s' "$current_row" | jq -r '.url // empty')"
           echo "deployed_sha=$deployed_sha" >> "$GITHUB_OUTPUT"
-          echo "deployed_repository=$deployed_repository" >> "$GITHUB_OUTPUT"
-          if [ -n "$deployed_url" ]; then
-            echo "deployment_url=https://$deployed_url" >> "$GITHUB_OUTPUT"
-          fi
-          if [ "$deployed_sha" = "$GITHUB_SHA" ]; then
+          if [ "$current_repository" = "$GITHUB_REPOSITORY" ] && [ "$current_sha" = "$GITHUB_SHA" ]; then
             echo "already_deployed=true" >> "$GITHUB_OUTPUT"
-            echo "Exact commit is already the latest READY production deployment."
+            if [ -n "$current_url" ]; then
+              echo "deployment_url=https://$current_url" >> "$GITHUB_OUTPUT"
+            fi
+            echo "Exact commit from $GITHUB_REPOSITORY is already the latest READY production deployment."
           else
             echo "already_deployed=false" >> "$GITHUB_OUTPUT"
-            echo "Previous production commit: ${deployed_sha:-none}"
+            echo "Previous production commit from this repository: ${deployed_sha:-none}"
+            echo "Current shared production repository: ${current_repository:-unknown}"
+            echo "Target repository: $GITHUB_REPOSITORY"
             echo "Target production commit: $GITHUB_SHA"
           fi
 
@@ -145,7 +143,6 @@ jobs:
         if: steps.profile.outputs.deploy == 'true'
         env:
           RELEASE_BASE_SHA: ${{ steps.production_state.outputs.deployed_sha }}
-          RELEASE_BASE_REPOSITORY: ${{ steps.production_state.outputs.deployed_repository }}
         run: node scripts/release-manifest.mjs
 
       - name: Upload release/change-set manifest
@@ -203,7 +200,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deployment_url="$(vercel deploy --prebuilt --archive=tgz --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID")"
+          github_org="${GITHUB_REPOSITORY%%/*}"
+          github_repo="${GITHUB_REPOSITORY#*/}"
+          deployment_url="$(vercel deploy --prebuilt --archive=tgz --prod --yes \
+            --token="$VERCEL_TOKEN" \
+            --scope="$VERCEL_ORG_ID" \
+            --meta "githubCommitSha=$GITHUB_SHA" \
+            --meta "githubCommitRef=main" \
+            --meta "githubOrg=$github_org" \
+            --meta "githubRepo=$github_repo")"
           case "$deployment_url" in
             https://*) ;;
             *) echo "::error::Vercel did not return a production deployment URL"; exit 1 ;;
