@@ -39,6 +39,11 @@ function expectedReleaseSource(releaseType:unknown){
   ? {repo:LOCAL_BASE_REPO,ref:LOCAL_BASE_REF}
   : {repo:LOCAL_ENGINE_REPO,ref:LOCAL_ENGINE_REF};
 }
+function expectedReleaseArtifactRepo(releaseType:unknown){
+ return String(releaseType||'').toLowerCase()==='base'
+  ? 'remipetrovich-design/OrbitFS-Control-Centre'
+  : 'remipetrovich-design/OrbitFS_Engine';
+}
 
 function authoritativeDatabaseRuntimeAccess(){
  return {...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT,publicReadTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.publicReadTables],authenticatedReadTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.authenticatedReadTables],serverFullAccessTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.serverFullAccessTables],restPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.restPreflightTables],serverPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.serverPreflightTables],runtimeSecretRoles:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretRoles],runtimeSecretTablePrefixes:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretTablePrefixes],runtimeSecretExcludedTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretExcludedTables],runtimeSecretPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretPreflightTables]};
@@ -512,7 +517,8 @@ export async function createRelease(input:{productId:string;channel:string;versi
  const pool=db();
  const expectedSource=expectedReleaseSource(input.releaseType);
  if(String(input.sourceRepo||'').trim()!==expectedSource.repo||String(input.sourceRef||'').trim()!==expectedSource.ref)throw new Error(`Release source must stay on this GitHub system: ${expectedSource.repo}@${expectedSource.ref}`);
- if(String(input.artifactRepo||input.sourceRepo||'').trim()!==expectedSource.repo)throw new Error('Release artifact repository must match the local source repository');
+ const expectedArtifactRepo=expectedReleaseArtifactRepo(input.releaseType);
+ if(String(input.artifactRepo||'').trim()!==expectedArtifactRepo)throw new Error(`Release artifact repository must stay on this GitHub system: ${expectedArtifactRepo}`);
  const settings=(await pool.query('select system_enabled,release_system_enabled,deployment_enabled from system_settings where id=true')).rows[0];
  if(!settings?.system_enabled||!settings.release_system_enabled||(input.releaseType==='base'&&!settings.deployment_enabled))throw new Error('Release/deployment system is offline');
  if(!isOrbitReleaseVersion(input.version))throw new Error('Invalid OrbitFS release version. Use a numeric version such as 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0.');
@@ -639,9 +645,10 @@ export async function createRelease(input:{productId:string;channel:string;versi
 }
 async function validateSourceIdentity(row:any){
  const expected=expectedReleaseSource(row.release_type);
+ const expectedArtifactRepo=expectedReleaseArtifactRepo(row.release_type);
  const sourceRepo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim(),artifactRepo=String(row.artifact_repo||'').trim();
- const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===sourceRepo;
- return {key:'source_identity',ok,message:ok?`Source identity is authoritative and system-local: ${sourceRepo}@${ref} (${sha.slice(0,8)}).`:`Expected only ${expected.repo}@${expected.ref}, with artifact_repo matching source_repo and a full commit SHA.`};
+ const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===expectedArtifactRepo;
+ return {key:'source_identity',ok,message:ok?`Source and artifact identity are authoritative and system-local: ${sourceRepo}@${ref} → ${artifactRepo} (${sha.slice(0,8)}).`:`Expected ${expected.repo}@${expected.ref}, artifact_repo ${expectedArtifactRepo}, and a full commit SHA.`};
 }
 async function validateUpdateBaseCompatibility(row:any){
  if(row.release_type!=='update')return {key:'minimum_base',ok:true,message:'Base compatibility check is not required for Base releases.'};
