@@ -10,9 +10,9 @@ create table if not exists system_settings (
   release_system_enabled boolean not null default true,
   auto_technical_approval_enabled boolean not null default true,
   deployment_enabled boolean not null default true,
-  validation_ttl_seconds integer not null default 60,
+  validation_ttl_seconds integer not null default 5400,
   offline_grace_seconds integer not null default 0,
-  pulse_poll_seconds integer not null default 15,
+  pulse_poll_seconds integer not null default 5400,
   max_failed_validations integer not null default 3,
   allow_offline_grace boolean not null default false,
   pulse_revision bigint not null default 1,
@@ -76,9 +76,9 @@ alter table releases add column if not exists manifest jsonb not null default '{
 alter table system_settings add column if not exists release_system_enabled boolean not null default true;
 alter table system_settings add column if not exists auto_technical_approval_enabled boolean not null default true;
 alter table system_settings add column if not exists deployment_enabled boolean not null default true;
-alter table system_settings add column if not exists validation_ttl_seconds integer not null default 60;
+alter table system_settings add column if not exists validation_ttl_seconds integer not null default 5400;
 alter table system_settings add column if not exists offline_grace_seconds integer not null default 0;
-alter table system_settings add column if not exists pulse_poll_seconds integer not null default 15;
+alter table system_settings add column if not exists pulse_poll_seconds integer not null default 5400;
 alter table system_settings add column if not exists max_failed_validations integer not null default 3;
 alter table system_settings add column if not exists allow_offline_grace boolean not null default false;
 alter table system_settings add column if not exists pulse_revision bigint not null default 1;
