@@ -250,9 +250,9 @@ export async function updateRuntimePolicy(input:Partial<RuntimePolicy>,actorUser
     return Number.isFinite(n)?Math.min(max,Math.max(min,Math.floor(n))):fallback;
   };
   const next:RuntimePolicy={
-    validation_ttl_seconds:clamp(input.validation_ttl_seconds,5,86400,Number(current?.validation_ttl_seconds||60)),
+    validation_ttl_seconds:clamp(input.validation_ttl_seconds,60,86400,Number(current?.validation_ttl_seconds||5400)),
     offline_grace_seconds:clamp(input.offline_grace_seconds,0,604800,Number(current?.offline_grace_seconds||0)),
-    pulse_poll_seconds:clamp(input.pulse_poll_seconds,5,3600,Number(current?.pulse_poll_seconds||15)),
+    pulse_poll_seconds:clamp(input.pulse_poll_seconds,60,86400,Number(current?.pulse_poll_seconds||5400)),
     max_failed_validations:clamp(input.max_failed_validations,1,100,Number(current?.max_failed_validations||3)),
     allow_offline_grace:input.allow_offline_grace===undefined?Boolean(current?.allow_offline_grace):Boolean(input.allow_offline_grace),
   };
