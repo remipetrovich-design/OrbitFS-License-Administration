@@ -26,7 +26,7 @@ export async function POST(request:Request){
     const releaseType=String(body.release_type||body.releaseType||'update').trim().toLowerCase();
     if(!['base','update'].includes(releaseType))return NextResponse.json({error:'INVALID_RELEASE_TYPE'},{status:400});
     const sourceRepo=String(body.source_repo??body.sourceRepo??'').trim();
-    const defaultCustomerPublicationRepo=sourceRepo.startsWith('remipetrovich-design/')?'remipetrovich-design/OrbitFS-Billing-Shopfront':'lucaskerim123/V2_Billing_Store';
+    const defaultCustomerPublicationRepo='remipetrovich-design/OrbitFS-Billing-Shopfront';
     const row=await createRelease({
       productId:product.id,channel:String(body.channel||'stable').trim().toLowerCase(),version:String(body.version||'').trim(),releaseType:releaseType as 'base'|'update',
       sourceRepo:sourceRepo||null,sourceRef:body.source_ref??body.sourceRef??null,sourceSha:body.source_sha??body.sourceCommit??null,
