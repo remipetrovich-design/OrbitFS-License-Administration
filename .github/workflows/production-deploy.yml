@@ -25,13 +25,33 @@ jobs:
       VERCEL_CLI_VERSION: 59.23.1
 
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. This workflow will not access source, scan, build or deploy production."
+            exit 0
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout complete repository history at selected commit
+        if: steps.profile.outputs.deploy == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Verify immutable production source
+        if: steps.profile.outputs.deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -52,6 +72,7 @@ jobs:
           NODE
 
       - name: Verify exact commit passed Full Scan
+        if: steps.profile.outputs.deploy == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +96,7 @@ jobs:
           [ -n "$url" ] && echo "Full Scan: $url"
 
       - name: Use Node 22
+        if: steps.profile.outputs.deploy == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -82,6 +104,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Resolve previous production deployment
+        if: steps.profile.outputs.deploy == 'true'
         id: production_state
         shell: bash
         run: |
@@ -108,11 +131,13 @@ jobs:
           fi
 
       - name: Generate complete since-last-deploy change manifest
+        if: steps.profile.outputs.deploy == 'true'
         env:
           RELEASE_BASE_SHA: ${{ steps.production_state.outputs.deployed_sha }}
         run: node scripts/release-manifest.mjs
 
       - name: Upload release/change-set manifest
+        if: steps.profile.outputs.deploy == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: production-release-${{ github.sha }}
@@ -121,17 +146,17 @@ jobs:
           retention-days: 90
 
       - name: Install pinned Vercel CLI
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         run: |
           npm install --global "vercel@$VERCEL_CLI_VERSION"
           vercel --version
 
       - name: Pull production configuration only
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Verify pulled production project identity
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -144,11 +169,11 @@ jobs:
           NODE
 
       - name: Build exact production artifact without deploying
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Verify prebuilt production artifact locally
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -161,7 +186,7 @@ jobs:
           NODE
 
       - name: Deploy exact validated prebuilt artifact to production
-        if: steps.production_state.outputs.already_deployed != 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         id: deploy
         shell: bash
         run: |
@@ -176,7 +201,7 @@ jobs:
           echo "Deployment: $deployment_url"
 
       - name: Reuse existing production deployment
-        if: steps.production_state.outputs.already_deployed == 'true'
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
         run: |
           echo "Production deployment not required."
           echo "Commit: $GITHUB_SHA"
