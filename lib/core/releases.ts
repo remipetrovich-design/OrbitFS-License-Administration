@@ -28,6 +28,17 @@ const BASE_DATABASE_RUNTIME_ACCESS_CONTRACT={
  runtimeSecretProbeTable:'orbitfs_runtime_secret_probe'
 };
 const LEGACY_BASE_ENGINE_DEPLOYER_PROTOCOL=1;
+const LOCAL_BASE_REPO='remipetrovich-design/OrbitFS-Base-System';
+const LOCAL_BASE_REF='base-release';
+const LOCAL_ENGINE_REPO='remipetrovich-design/OrbitFS_Engine';
+const LOCAL_ENGINE_REF='UPDATE_RELEASES';
+const LOCAL_SOURCE_REPOS=[LOCAL_BASE_REPO,LOCAL_ENGINE_REPO] as const;
+const LOCAL_GITHUB_TOKEN_ENV='ORBITFS_FALLBACK_GITHUB_TOKEN';
+function expectedReleaseSource(releaseType:unknown){
+ return String(releaseType||'').toLowerCase()==='base'
+  ? {repo:LOCAL_BASE_REPO,ref:LOCAL_BASE_REF}
+  : {repo:LOCAL_ENGINE_REPO,ref:LOCAL_ENGINE_REF};
+}
 
 function authoritativeDatabaseRuntimeAccess(){
  return {...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT,publicReadTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.publicReadTables],authenticatedReadTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.authenticatedReadTables],serverFullAccessTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.serverFullAccessTables],restPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.restPreflightTables],serverPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.serverPreflightTables],runtimeSecretRoles:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretRoles],runtimeSecretTablePrefixes:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretTablePrefixes],runtimeSecretExcludedTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretExcludedTables],runtimeSecretPreflightTables:[...BASE_DATABASE_RUNTIME_ACCESS_CONTRACT.runtimeSecretPreflightTables]};
@@ -394,7 +405,7 @@ async function checkArtifact(row: any) {
   if(row.release_type==='base'&&artifactName!==`orbitfs-base-v${row.version}.json.gz`)return {checks:[{key:'artifact_reference',ok:false,message:`Base artifact filename must be orbitfs-base-v${row.version}.json.gz.`}]};
 
   const tokens = [...new Set([
-    String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN || '').trim(),
+    String(process.env[LOCAL_GITHUB_TOKEN_ENV] || '').trim(),
     String(process.env.GITHUB_RELEASE_TOKEN || '').trim(),
     String(process.env.GITHUB_TOKEN || '').trim(),
     ''
@@ -478,7 +489,7 @@ async function checkWorkflow(row: any) {
   const repo = String(row.artifact_repo || row.source_repo || '').trim();
   if (!runId || !repo || !repo.includes('/')) return { key: 'ci', ok: false, message: 'Release CI run metadata is missing.' };
   const headers = new Headers({ accept: 'application/vnd.github+json', 'user-agent': 'OrbitFS-License-Master/2', 'x-github-api-version': '2022-11-28' });
-  const token = String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN || process.env.GITHUB_RELEASE_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  const token = String(process.env[LOCAL_GITHUB_TOKEN_ENV] || process.env.GITHUB_RELEASE_TOKEN || process.env.GITHUB_TOKEN || '').trim();
   if (token) headers.set('authorization', `Bearer ${token}`);
   try {
     const response = await fetch(`https://api.github.com/repos/${repo}/actions/runs/${runId}`, { headers, cache: 'no-store' });
@@ -495,10 +506,13 @@ async function checkWorkflow(row: any) {
     return { key: 'ci', ok: false, message: error instanceof Error ? error.message : 'Release CI could not be verified.' };
   }
 }
-export async function listReleases(includeArchived=false){const where=includeArchived?'':'where r.archived_at is null';return(await db().query(`select r.*,p.slug product,p.name product_name from releases r join products p on p.id=r.product_id ${where} order by r.created_at desc`)).rows.map(withAuthoritativeReleaseRuntimeAccess);}
-export async function getLatestRelease(productSlug:string,channel='stable',releaseType:'base'|'update'='update'){const result=await db().query(`select r.id,r.version,r.channel,r.release_type,r.artifact_url,r.checksum,r.source_repo,r.source_ref,r.source_sha,r.artifact_name,r.artifact_repo,r.artifact_run_id,r.vercel_ready,r.supabase_ready,r.deployment_status,r.published_at,r.manifest,p.slug product from releases r join products p on p.id=r.product_id where p.slug=$1 and p.status='active' and r.channel=$2 and r.release_type=$3 and r.status='published' and r.review_status='approved' order by r.published_at desc nulls last,r.created_at desc limit 1`,[productSlug,channel,releaseType]);return withAuthoritativeReleaseRuntimeAccess(result.rows[0]??null);}
+export async function listReleases(includeArchived=false){const archive=includeArchived?'':'and r.archived_at is null';return(await db().query(`select r.*,p.slug product,p.name product_name from releases r join products p on p.id=r.product_id where r.source_repo = any($1::text[]) ${archive} order by r.created_at desc`,[[...LOCAL_SOURCE_REPOS]])).rows.map(withAuthoritativeReleaseRuntimeAccess);}
+export async function getLatestRelease(productSlug:string,channel='stable',releaseType:'base'|'update'='update'){const expected=expectedReleaseSource(releaseType);const result=await db().query(`select r.id,r.version,r.channel,r.release_type,r.artifact_url,r.checksum,r.source_repo,r.source_ref,r.source_sha,r.artifact_name,r.artifact_repo,r.artifact_run_id,r.vercel_ready,r.supabase_ready,r.deployment_status,r.published_at,r.manifest,p.slug product from releases r join products p on p.id=r.product_id where p.slug=$1 and p.status='active' and r.channel=$2 and r.release_type=$3 and r.source_repo=$4 and r.status='published' and r.review_status='approved' order by r.published_at desc nulls last,r.created_at desc limit 1`,[productSlug,channel,releaseType,expected.repo]);return withAuthoritativeReleaseRuntimeAccess(result.rows[0]??null);}
 export async function createRelease(input:{productId:string;channel:string;version:string;releaseType:'base'|'update';sourceRepo?:string|null;sourceRef?:string|null;artifactUrl?:string|null;checksum?:string|null;notes?:string|null;publish?:boolean;actorUserId?:string|null;actor?:string;reviewStatus?:'pending'|'approved'|'rejected';deploymentStatus?:'not_started'|'queued'|'deploying'|'deployed'|'failed';sourceSha?:string|null;artifactName?:string|null;artifactRepo?:string|null;artifactRunId?:number|null;vercelReady?:boolean;supabaseReady?:boolean;customerPublicationRepo?:string|null;manifest?:any;revision?:number;supersedesReleaseId?:string|null}){
  const pool=db();
+ const expectedSource=expectedReleaseSource(input.releaseType);
+ if(String(input.sourceRepo||'').trim()!==expectedSource.repo||String(input.sourceRef||'').trim()!==expectedSource.ref)throw new Error(`Release source must stay on this GitHub system: ${expectedSource.repo}@${expectedSource.ref}`);
+ if(String(input.artifactRepo||input.sourceRepo||'').trim()!==expectedSource.repo)throw new Error('Release artifact repository must match the local source repository');
  const settings=(await pool.query('select system_enabled,release_system_enabled,deployment_enabled from system_settings where id=true')).rows[0];
  if(!settings?.system_enabled||!settings.release_system_enabled||(input.releaseType==='base'&&!settings.deployment_enabled))throw new Error('Release/deployment system is offline');
  if(!isOrbitReleaseVersion(input.version))throw new Error('Invalid OrbitFS release version. Use a numeric version such as 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0.');
@@ -508,9 +522,9 @@ export async function createRelease(input:{productId:string;channel:string;versi
  const incomingManifest={...(input.manifest||{}),components:canonicalComponents(input.manifest?.components,input.releaseType)};
  const existing=(await pool.query(
   `select * from releases
-   where product_id=$1 and channel=$2 and version=$3 and release_type=$4
+   where product_id=$1 and channel=$2 and version=$3 and release_type=$4 and source_repo=$5
    order by revision desc,created_at desc limit 1`,
-  [input.productId,input.channel,input.version,input.releaseType]
+  [input.productId,input.channel,input.version,input.releaseType,expectedSource.repo]
  )).rows[0];
 
  if(existing){
@@ -557,8 +571,8 @@ export async function createRelease(input:{productId:string;channel:string;versi
   }
 
   const nextRevision=Number((await pool.query(
-   `select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=$4`,
-   [input.productId,input.channel,input.version,input.releaseType]
+   `select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=$4 and source_repo=$5`,
+   [input.productId,input.channel,input.version,input.releaseType,expectedSource.repo]
   )).rows[0].revision||0)+1;
   const receivedAt=new Date().toISOString();
   const manifest={
@@ -624,9 +638,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
  return row;
 }
 async function validateSourceIdentity(row:any){
- const expected=row.release_type==='base'
-  ? {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'}
-  : {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASES'};
+ const expected=expectedReleaseSource(row.release_type);
  const sourceRepo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim(),artifactRepo=String(row.artifact_repo||'').trim();
  const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===sourceRepo;
  return {key:'source_identity',ok,message:ok?`Source identity is authoritative and system-local: ${sourceRepo}@${ref} (${sha.slice(0,8)}).`:`Expected only ${expected.repo}@${expected.ref}, with artifact_repo matching source_repo and a full commit SHA.`};
@@ -643,10 +655,11 @@ async function validateUpdateBaseCompatibility(row:any){
   where p.slug='orbitfs_base'
     and r.release_type='base'
     and r.channel=$1
+    and r.source_repo=$2
     and r.status='published'
     and r.review_status='approved'
     and r.archived_at is null
-  order by r.published_at desc nulls last,r.created_at desc`,[baseChannel])).rows;
+  order by r.published_at desc nulls last,r.created_at desc`,[baseChannel,LOCAL_BASE_REPO])).rows;
  const compatible=rows.filter((base:any)=>{
    const comparison=compareOrbitReleaseVersions(String(base.version||''),minimumVersion);
    return comparison!==null&&comparison>=0;
@@ -695,8 +708,9 @@ async function validateVersionProgression(row:any){
   from releases r
   where r.product_id=$1 and r.channel=$2 and r.release_type=$3
     and r.status='published' and r.review_status='approved'
+    and r.source_repo=$5
     and r.archived_at is null and r.id<>$4
-  order by r.published_at desc nulls last,r.created_at desc`,[row.product_id,row.channel,row.release_type,row.id])).rows;
+  order by r.published_at desc nulls last,r.created_at desc`,[row.product_id,row.channel,row.release_type,row.id,expectedReleaseSource(row.release_type).repo])).rows;
  const previous=published.find((candidate:any)=>orbitReleaseVersionFamily(candidate.version)===family);
  if(!previous)return {key:'version_progression',ok:true,message:`No previous published ${family||'OrbitFS'} ${row.release_type} version exists in ${row.channel}; ${version} starts that version line.`};
  const cmp=compareOrbitReleaseVersions(version,previous.version);
