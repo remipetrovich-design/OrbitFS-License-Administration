@@ -249,10 +249,64 @@ export async function getGithubProfile():Promise<GithubProfileName>{
   return String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
 }
 
-export async function setGithubProfile(next:GithubProfileName,expected:GithubProfileName,actorUserId:string|null,actor:string){
+const GITHUB_PROFILE_TARGETS:Record<GithubProfileName,{tokenEnv:string;repos:Array<{repo:string;ref:string}>}>={
+  primary:{
+    tokenEnv:'ORBITFS_RELEASE_DISPATCH_TOKEN',
+    repos:[
+      {repo:'lucaskerim123/Custom-licence-manager',ref:'main'},
+      {repo:'lucaskerim123/V2_Billing_Store',ref:'main'},
+      {repo:'lucaskerim123/Dev-panel',ref:'main'},
+      {repo:'lucaskerim123/V1-vercel-base',ref:'base-release'},
+      {repo:'lucaskerim123/V1-vercel-engine',ref:'UPDATE_RELEASE'},
+    ],
+  },
+  fallback:{
+    tokenEnv:'ORBITFS_FALLBACK_GITHUB_TOKEN',
+    repos:[
+      {repo:'remipetrovich-design/OrbitFS-License-Administration',ref:'main'},
+      {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',ref:'main'},
+      {repo:'remipetrovich-design/OrbitFS-Control-Centre',ref:'main'},
+      {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'},
+      {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASE'},
+    ],
+  },
+};
+
+async function verifyGithubProfileTarget(profile:GithubProfileName){
+  const target=GITHUB_PROFILE_TARGETS[profile];
+  const token=String(process.env[target.tokenEnv]||'').trim();
+  if(!token)throw new Error('Cannot activate '+profile.toUpperCase()+': missing '+target.tokenEnv+' on License Manager');
+  const headers={authorization:'Bearer '+token,accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
+  const checked:Array<{repo:string;ref:string;sha:string}>=[];
+  for(const item of target.repos){
+    const repoResponse=await fetch('https://api.github.com/repos/'+item.repo,{headers,cache:'no-store'});
+    if(!repoResponse.ok)throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+' credential check failed ('+repoResponse.status+')');
+    const refResponse=await fetch('https://api.github.com/repos/'+item.repo+'/git/ref/heads/'+encodeURIComponent(item.ref),{headers,cache:'no-store'});
+    if(!refResponse.ok)throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+'@'+item.ref+' is unavailable ('+refResponse.status+')');
+    const ref=await refResponse.json();
+    const sha=String(ref?.object?.sha||'').trim();
+    if(!/^[a-f0-9]{40}$/i.test(sha))throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+'@'+item.ref+' did not return a valid commit');
+    checked.push({repo:item.repo,ref:item.ref,sha});
+  }
+  return checked;
+}
+
+export async function setGithubProfile(
+  next:GithubProfileName,
+  expected:GithubProfileName,
+  confirmation:string,
+  vercelConfirmed:boolean,
+  actorUserId:string|null,
+  actor:string,
+){
   if(next!=='primary'&&next!=='fallback')throw new Error('Invalid GitHub profile');
   if(expected!=='primary'&&expected!=='fallback')throw new Error('Invalid current GitHub profile');
   if(next===expected)throw new Error('Requested GitHub profile is already active');
+  const phrase=next==='primary'?'SWITCH TO MAIN':'SWITCH TO FALLBACK';
+  if(String(confirmation||'')!==phrase)throw new Error('Source-mode confirmation did not match '+phrase);
+  if(!vercelConfirmed)throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
+
+  const checked=await verifyGithubProfileTarget(next);
   const pool=db();
   const client=await pool.connect();
   try{
@@ -265,7 +319,13 @@ export async function setGithubProfile(next:GithubProfileName,expected:GithubPro
     await client.query(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
        values($1,$2,'github_profile.changed','system_settings','github_profile',$3)`,
-      [actorUserId,actor,JSON.stringify({from:actual,to:next,master_authority_offline:true})],
+      [actorUserId,actor,JSON.stringify({
+        from:actual,
+        to:next,
+        master_authority_offline:true,
+        vercel_and_latest_source_confirmed:true,
+        github_targets:checked,
+      })],
     );
     await client.query('commit');
     return updated;

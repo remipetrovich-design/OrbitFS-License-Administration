@@ -30,9 +30,11 @@ const mappings={
 export default function GithubProfileControl({profile,masterOffline,canManage,action}:Props){
  const [confirming,setConfirming]=useState(false);
  const [vercelReady,setVercelReady]=useState(false);
+ const [confirmation,setConfirmation]=useState('');
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
+ const confirmationPhrase=target==='primary'?'SWITCH TO MAIN':'SWITCH TO FALLBACK';
  const canSwitch=canManage&&masterOffline;
 
  return <>
@@ -65,7 +67,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       type="button"
       className={`github-mode-lever ${profile==='fallback'?'points-down':'points-up'}`}
       disabled={!canSwitch}
-      onClick={()=>{setVercelReady(false);setConfirming(true)}}
+      onClick={()=>{setVercelReady(false);setConfirmation('');setConfirming(true)}}
       aria-label={canSwitch?`Switch source mode to ${targetLabel}`:'Source mode switch is locked until Master Authority is off'}
      >
       <span className="github-mode-lever-slot"/>
@@ -107,9 +109,14 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <input type="checkbox" name="vercel_confirmed" checked={vercelReady} onChange={event=>setVercelReady(event.target.checked)} required/>
       <span><strong>I changed the Vercel Git connections and synced the latest source.</strong><small>The API/control plane is already offline because Master Authority is OFF.</small></span>
      </label>
+     <label className="github-mode-phrase">
+      <span>Type <strong>{confirmationPhrase}</strong> to confirm</span>
+      <input name="confirmation" value={confirmation} onChange={event=>setConfirmation(event.target.value)} autoComplete="off" spellCheck={false}/>
+      <small>License Manager will also verify the target GitHub credential, all five repositories and their required refs before changing mode.</small>
+     </label>
      <div className="github-mode-modal-actions">
       <button type="button" className="button secondary" onClick={()=>setConfirming(false)}>Cancel</button>
-      <button type="submit" className="button danger" disabled={!vercelReady}>Switch to {targetLabel}</button>
+      <button type="submit" className="button danger" disabled={!vercelReady||confirmation!==confirmationPhrase}>Switch to {targetLabel}</button>
      </div>
     </form>
    </div>

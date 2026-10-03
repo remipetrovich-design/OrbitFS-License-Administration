@@ -46,8 +46,9 @@ async function switchGithubProfile(formData:FormData){
  const next=String(formData.get('profile')||'') as GithubProfileName;
  const expected=String(formData.get('expected_profile')||'') as GithubProfileName;
  if(!['primary','fallback'].includes(next)||!['primary','fallback'].includes(expected))return;
- if(formData.get('vercel_confirmed')!=='on')throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
- await setGithubProfile(next,expected,user.id,user.email);
+ const vercelConfirmed=formData.get('vercel_confirmed')==='on';
+ const confirmation=String(formData.get('confirmation')||'');
+ await setGithubProfile(next,expected,confirmation,vercelConfirmed,user.id,user.email);
  revalidatePath('/settings');revalidatePath('/');
 }
 
