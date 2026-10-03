@@ -624,19 +624,12 @@ export async function createRelease(input:{productId:string;channel:string;versi
  return row;
 }
 async function validateSourceIdentity(row:any){
- const allowed=row.release_type==='base'
-  ? [
-     {repo:'lucaskerim123/V1-vercel-base',ref:'base-release'},
-     {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'}
-    ]
-  : [
-     {repo:'lucaskerim123/V1-vercel-engine',ref:'UPDATE_RELEASE'},
-     {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASES'}
-    ];
+ const expected=row.release_type==='base'
+  ? {repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'}
+  : {repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASES'};
  const sourceRepo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim(),artifactRepo=String(row.artifact_repo||'').trim();
- const matched=allowed.find((candidate)=>candidate.repo===sourceRepo&&candidate.ref===ref);
- const ok=Boolean(matched)&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===sourceRepo;
- return {key:'source_identity',ok,message:ok?`Source identity is authoritative and profile-consistent: ${sourceRepo}@${ref} (${sha.slice(0,8)}).`:`Release source/artifact identity must be one complete OrbitFS profile: ${allowed.map((candidate)=>candidate.repo+'@'+candidate.ref).join(' or ')}, with artifact_repo matching source_repo and a full commit SHA.`};
+ const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===sourceRepo;
+ return {key:'source_identity',ok,message:ok?`Source identity is authoritative and system-local: ${sourceRepo}@${ref} (${sha.slice(0,8)}).`:`Expected only ${expected.repo}@${expected.ref}, with artifact_repo matching source_repo and a full commit SHA.`};
 }
 async function validateUpdateBaseCompatibility(row:any){
  if(row.release_type!=='update')return {key:'minimum_base',ok:true,message:'Base compatibility check is not required for Base releases.'};
