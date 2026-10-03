@@ -106,7 +106,7 @@ export async function runReleaseAction(
         message:
           action === 'approve'
             ? 'Technical approval recorded. Candidate is ready for Billing Store final review.'
-            : 'Release rejected and held out of publication.',
+            : 'Release rejected and returned to Dev Panel for another Stage 1 build or deletion.',
       };
     }
 
