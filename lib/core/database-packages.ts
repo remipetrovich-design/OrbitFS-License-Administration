@@ -18,6 +18,13 @@ const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
   apex:['remipetrovich-design/OrbitFS_Engine'],
   studio:['remipetrovich-design/OrbitFS_Engine']
 };
+const LOCAL_DATABASE_SOURCE_REPOS=[...new Set(Object.values(SOURCE_REPOS).flat())];
+
+function localSourceRepoForComponent(value:CustomerDatabaseComponent){
+  const repo=SOURCE_REPOS[value][0];
+  if(!repo)throw new Error('DATABASE_PACKAGE_SOURCE_REPO_UNCONFIGURED');
+  return repo;
+}
 
 const MIGRATION_PATHS:Record<CustomerDatabaseComponent,RegExp>={
   base:/^supabase\/migrations\/\d{14}_[A-Za-z0-9._-]+\.sql$/,
@@ -185,6 +192,7 @@ export async function publishDatabasePackage(id:string,actor:string){
     const candidate=(await client.query('select * from database_packages where id=$1 for update',[id])).rows[0];
 
     if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
+    if(String(candidate.source_repo||'')!==localSourceRepoForComponent(component(candidate.component)))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
     if(candidate.status==='current'){
       await client.query('commit');
       return candidate;
@@ -192,14 +200,14 @@ export async function publishDatabasePackage(id:string,actor:string){
     if(candidate.status!=='candidate')throw new Error('DATABASE_PACKAGE_NOT_PUBLISHABLE');
 
     const newer=(await client.query(
-      "select 1 from database_packages where component=$1 and status='current' and database_schema_version>$2 limit 1",
-      [candidate.component,candidate.database_schema_version]
+      "select 1 from database_packages where component=$1 and source_repo=$2 and status='current' and database_schema_version>$3 limit 1",
+      [candidate.component,candidate.source_repo,candidate.database_schema_version]
     )).rows[0];
     if(newer)throw new Error('DATABASE_PACKAGE_VERSION_ROLLBACK');
 
     await client.query(
-      "update database_packages set status='superseded',superseded_at=now() where component=$1 and status='current'",
-      [candidate.component]
+      "update database_packages set status='superseded',superseded_at=now() where component=$1 and source_repo=$2 and status='current'",
+      [candidate.component,candidate.source_repo]
     );
 
     const published=(await client.query(
@@ -218,16 +226,17 @@ export async function publishDatabasePackage(id:string,actor:string){
 }
 
 export async function listDatabasePackages(componentFilter?:string){
-  const values:any[]=[];
-  let where='';
+  const values:any[]=[[...LOCAL_DATABASE_SOURCE_REPOS]];
+  let componentClause='';
   if(componentFilter){
     values.push(component(componentFilter));
-    where='where component=$1';
+    componentClause='and component=$2';
   }
 
   return (await db().query(
     `select id,component,database_target,source_repo,source_commit,database_schema_version,minimum_base_schema_version,minimum_base_version,package_sha256,status,created_by,published_by,created_at,published_at,superseded_at
-     from database_packages ${where}
+     from database_packages
+     where source_repo = any($1::text[]) ${componentClause}
      order by component,database_schema_version desc,created_at desc`,
     values
   )).rows;
@@ -236,8 +245,8 @@ export async function listDatabasePackages(componentFilter?:string){
 export async function getCurrentDatabasePackage(componentValue:string){
   const selected=component(componentValue);
   return (await db().query(
-    "select * from database_packages where component=$1 and database_target='customer' and status='current' limit 1",
-    [selected]
+    "select * from database_packages where component=$1 and source_repo=$2 and database_target='customer' and status='current' limit 1",
+    [selected,localSourceRepoForComponent(selected)]
   )).rows[0]||null;
 }
 
@@ -314,16 +323,17 @@ export async function publishReleaseDatabasePackages(client:any,row:any,actorUse
   for(const ref of refs){
     const candidate=(await client.query('select * from database_packages where id=$1 for update',[ref.id])).rows[0];
     if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
+    if(String(candidate.source_repo||'')!==localSourceRepoForComponent(component(candidate.component)))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
     if(!['candidate','current'].includes(String(candidate.status||'')))throw new Error('DATABASE_PACKAGE_NOT_PUBLISHABLE');
     const newer=(await client.query(
-      "select 1 from database_packages where component=$1 and status='current' and database_schema_version>$2 and id<>$3 limit 1",
-      [candidate.component,candidate.database_schema_version,candidate.id]
+      "select 1 from database_packages where component=$1 and source_repo=$2 and status='current' and database_schema_version>$3 and id<>$4 limit 1",
+      [candidate.component,candidate.source_repo,candidate.database_schema_version,candidate.id]
     )).rows[0];
     if(newer)throw new Error('DATABASE_PACKAGE_VERSION_ROLLBACK');
 
     await client.query(
-      "update database_packages set status='superseded',superseded_at=coalesce(superseded_at,now()) where component=$1 and status='current' and id<>$2",
-      [candidate.component,candidate.id]
+      "update database_packages set status='superseded',superseded_at=coalesce(superseded_at,now()) where component=$1 and source_repo=$2 and status='current' and id<>$3",
+      [candidate.component,candidate.source_repo,candidate.id]
     );
     const current=(await client.query(
       "update database_packages set status='current',published_at=coalesce(published_at,now()),published_by=coalesce(published_by,$2),superseded_at=null where id=$1 returning id,component,database_schema_version,package_sha256,source_commit,status",
