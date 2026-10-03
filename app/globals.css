@@ -485,3 +485,108 @@ details[open]>.managed-record-summary .collapse-chevron{transform:rotate(180deg)
 @media(max-width:680px){.github-mode-inner{padding-inline:26px}.github-mode-heading{display:grid}.github-mode-status{text-align:left}.github-mode-console{grid-template-columns:1fr 100px 1fr;padding-inline:0}.github-mode-side strong{font-size:14px}.github-mode-footer{display:grid}.github-mode-footer span{text-align:left}.github-mode-map>div{grid-template-columns:1fr}}
 
 .github-mode-phrase{display:grid;gap:6px;margin-top:12px}.github-mode-phrase>span{font-size:9px;color:#aab2be}.github-mode-phrase strong{color:#f6f7f9;letter-spacing:.04em}.github-mode-phrase input{width:100%;border:1px solid #3a4048;border-radius:8px;background:#090c10;color:#f7f8fa;padding:9px 10px;font:700 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;outline:none}.github-mode-phrase input:focus{border-color:#7379ff;box-shadow:0 0 0 2px rgba(115,121,255,.14)}.github-mode-phrase small{font-size:8px;line-height:1.4;color:#8f98a5}
+
+/* Compact hardware refinement v2 */
+.authority-hardware-panel{
+ max-width:900px;
+ padding:11px;
+ border-radius:15px;
+ box-shadow:inset 0 0 0 1px #2c3037,inset 0 0 20px rgba(255,255,255,.018),0 10px 26px rgba(17,24,39,.13);
+}
+.authority-hardware-panel:before{inset:5px;border-radius:11px}
+.authority-hardware-screw{width:18px;height:18px}
+.authority-hardware-screw:after{left:4px;right:4px;top:8px;height:1px}
+.authority-hardware-screw.screw-tl{left:8px;top:8px}.authority-hardware-screw.screw-tr{right:8px;top:8px}.authority-hardware-screw.screw-bl{left:8px;bottom:8px}.authority-hardware-screw.screw-br{right:8px;bottom:8px}
+.authority-hardware-master{padding:6px 42px 8px}
+.authority-hardware-master>.authority-hardware-cell{width:min(430px,100%)}
+.authority-hardware-cell{min-height:126px;padding:9px 8px 6px;border-right-width:1px;border-bottom-width:1px}
+.authority-hardware-grid{border-top-width:1px;border-left-width:1px}
+.authority-hardware-cell.is-master{min-height:138px;border-width:1px;border-radius:6px}
+.authority-hardware-cell h3{font-size:11px;line-height:1.08;letter-spacing:.03em}
+.authority-hardware-cell.is-master h3{font-size:17px}
+.authority-hardware-master-subtitle{margin-top:2px;font-size:9.5px}
+.authority-hardware-control{min-height:78px}
+.authority-hardware-switch-button{width:82px;min-height:78px;padding:2px 3px 0}
+.authority-hardware-lamp{width:34px;height:34px;border-width:2px;box-shadow:inset 0 -5px 8px rgba(0,0,0,.42),inset 0 3px 5px rgba(255,255,255,.28),0 0 0 1px #2c3035,0 2px 7px rgba(0,0,0,.65)}
+.authority-hardware-lamp.is-green{box-shadow:inset 0 -5px 8px rgba(0,0,0,.34),inset 0 3px 5px rgba(255,255,255,.4),0 0 0 1px #25332a,0 0 10px rgba(34,239,105,.42),0 2px 7px rgba(0,0,0,.65)}
+.authority-hardware-lamp.is-red{box-shadow:inset 0 -5px 8px rgba(0,0,0,.38),inset 0 3px 5px rgba(255,255,255,.32),0 0 0 1px #352426,0 0 9px rgba(239,39,51,.36),0 2px 7px rgba(0,0,0,.65)}
+.authority-hardware-switch-stage{width:66px;height:42px;margin-top:0}
+.authority-hardware-switch-label{right:0;font-size:8px;letter-spacing:.03em}
+.authority-hardware-switch-label.is-off-label{top:3px}.authority-hardware-switch-label.is-on-label{bottom:2px}
+.authority-hardware-toggle{left:2px;width:44px;height:42px}
+.authority-hardware-toggle-bezel{
+ left:7px;top:10px;width:31px;height:23px;border-radius:50%;
+ background:radial-gradient(ellipse at 42% 38%,#f4f1eb 0 12%,#b9b5ae 15% 30%,#64615d 33% 46%,#242526 50% 65%,#111214 68% 100%);
+ box-shadow:0 2px 4px rgba(0,0,0,.7),inset 0 1px 1px rgba(255,255,255,.4)
+}
+.authority-hardware-toggle-stick{
+ left:18px;width:8px;height:29px;border-radius:6px;
+ background:linear-gradient(90deg,#5c5955 0%,#f2eee7 33%,#88847d 62%,#303133 100%);
+ box-shadow:0 2px 4px rgba(0,0,0,.72),inset 1px 0 1px rgba(255,255,255,.5);
+ transform-origin:50% 50%;
+}
+.authority-hardware-toggle.is-up .authority-hardware-toggle-stick{top:-1px;bottom:auto;transform:rotate(-16deg)}
+.authority-hardware-toggle.is-down .authority-hardware-toggle-stick{top:auto;bottom:-1px;transform:rotate(16deg)}
+.authority-hardware-lock{min-height:22px;gap:1px 4px;font-size:7px}
+.authority-hardware-lock strong{padding:1px 4px;font-size:6px}
+.authority-hardware-lock small{font-size:6px}
+.authority-hardware-wiring{height:25px;margin:0 8.4%}
+.authority-hardware-wiring .wire-parent{height:16px}
+.authority-hardware-wiring .wire-bar{top:14px;height:1px}
+.authority-hardware-wiring .wire-drop{top:14px;height:11px;width:1px}
+.authority-hardware-wiring .wire-parent{width:1px}
+.authority-hardware-children{border-top:0}
+
+.github-mode-panel{
+ max-width:900px;
+ margin:0 auto 9px;
+ padding:10px;
+ border-radius:14px;
+ box-shadow:inset 0 0 0 1px #2c3037,inset 0 0 20px rgba(255,255,255,.018),0 8px 22px rgba(17,24,39,.12)
+}
+.github-mode-panel:before{inset:5px;border-radius:10px}
+.github-mode-inner{padding:2px 25px 4px}
+.github-mode-heading{gap:12px;padding:2px 0 7px;border-bottom-width:1px}
+.github-mode-heading>div:first-child>span,.github-mode-modal-head span{font-size:8px}
+.github-mode-heading h2{margin:2px 0 2px!important;font-size:16px!important}
+.github-mode-heading p{font-size:8px;line-height:1.35}
+.github-mode-status{min-width:126px;padding:6px 8px}
+.github-mode-status strong{font-size:8.5px}.github-mode-status small{font-size:7px}
+.github-mode-console{min-height:88px;grid-template-columns:1fr 78px 1fr;gap:9px;padding:7px 9% 5px}
+.github-mode-side{gap:3px}
+.github-mode-side strong{font-size:12px}.github-mode-side small{font-size:7px}
+.github-mode-lamp{width:31px;height:31px;border-width:2px}
+.github-mode-lever{width:72px;height:72px}
+.github-mode-lever-slot{left:18px;top:13px;width:36px;height:48px;border-radius:22px}
+.github-mode-lever-stick{left:32px;width:8px;height:40px;border-radius:6px}
+.github-mode-lever-cap{left:27px;width:18px;height:18px}
+.github-mode-lever.points-up .github-mode-lever-stick{top:3px;transform:rotate(10deg)}.github-mode-lever.points-up .github-mode-lever-cap{top:0}
+.github-mode-lever.points-down .github-mode-lever-stick{bottom:3px;transform:rotate(-10deg)}.github-mode-lever.points-down .github-mode-lever-cap{bottom:0}
+.github-mode-footer{gap:10px;padding-top:7px;border-top-width:1px;font-size:7.5px}
+.github-mode-modal{width:min(600px,100%)}
+
+@media(max-width:900px){
+ .authority-hardware-panel,.github-mode-panel{max-width:100%}
+ .authority-hardware-master{padding-inline:32px}
+ .authority-hardware-cell{min-height:122px;padding:8px 6px 5px}
+ .authority-hardware-cell.is-master{min-height:132px}
+}
+@media(max-width:680px){
+ .authority-hardware-panel{padding:9px 7px}
+ .authority-hardware-master{padding:8px 26px 7px}
+ .authority-hardware-cell{min-height:120px}
+ .authority-hardware-cell.is-master{min-height:128px}
+ .authority-hardware-cell.is-master h3{font-size:15px}
+ .authority-hardware-master-subtitle{font-size:8.5px}
+ .authority-hardware-children{margin-top:6px;border-top-width:1px}
+ .github-mode-inner{padding-inline:18px}
+ .github-mode-console{grid-template-columns:1fr 68px 1fr}
+}
+@media(max-width:430px){
+ .authority-hardware-master{padding-inline:20px}
+ .authority-hardware-cell{min-height:116px}
+ .authority-hardware-control{min-height:72px}
+ .authority-hardware-cell h3{font-size:10.5px}
+ .github-mode-heading{display:grid}
+ .github-mode-status{text-align:left}
+}
