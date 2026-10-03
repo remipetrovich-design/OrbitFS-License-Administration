@@ -307,7 +307,13 @@ async function scanPackage(row:any,bytes:Buffer){
         &&String(packageRuntimeOwnership.engineUpdaterExecutor||'')==='base-inner-deployer-v1'
         &&Array.isArray(packageRuntimeOwnership.excludedUpdateTargets)
         &&[...packageRuntimeOwnership.excludedUpdateTargets].map(String).sort().join(',')===expectedExcludedTargets.slice().sort().join(',');
-      const runtimeOwnershipHandoffMatches=JSON.stringify(recordRuntimeOwnership)===JSON.stringify(packageRuntimeOwnership);
+      const runtimeOwnershipHandoffMatches=
+        String(recordRuntimeOwnership.base||'')===String(packageRuntimeOwnership.base||'')
+        &&String(recordRuntimeOwnership.innerDeployer||'')===String(packageRuntimeOwnership.innerDeployer||'')
+        &&String(recordRuntimeOwnership.engineUpdaterExecutor||'')===String(packageRuntimeOwnership.engineUpdaterExecutor||'')
+        &&Array.isArray(recordRuntimeOwnership.excludedUpdateTargets)
+        &&Array.isArray(packageRuntimeOwnership.excludedUpdateTargets)
+        &&[...recordRuntimeOwnership.excludedUpdateTargets].map(String).sort().join(',')===[...packageRuntimeOwnership.excludedUpdateTargets].map(String).sort().join(',');
       const handoffMatches=String(recordManifest.format||'')===String(pkg.format||'')
         &&Number(recordManifest.schemaVersion||0)===Number(pkg.schemaVersion||0)
         &&Number(recordManifest.fileCount||0)===Number(pkg.fileCount||0)
