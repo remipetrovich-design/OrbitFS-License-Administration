@@ -192,12 +192,8 @@ export default async function Settings(){
   </div>
 
   <section className="section">
-   <div className="section-head"><div><div className="eyebrow">Source authority</div><h2>MAIN / FALLBACK</h2><p className="muted">This switch owns the active GitHub source family. It is locked until External authority / master shutdown is OFF.</p></div></div>
-   <GithubProfileControl profile={githubProfile as 'primary'|'fallback'} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}/>
-  </section>
-
-  <section className="section">
-   <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">Hardware-style authority controls. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
+   <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">MAIN / FALLBACK sits directly above the authority board. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
+   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}/>
    <AuthorityControlGrid rows={rows} canManage={canManage} action={updateSettings}/>
   </section>
 
