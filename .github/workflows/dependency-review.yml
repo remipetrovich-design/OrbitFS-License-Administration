@@ -11,7 +11,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Check active GitHub profile
+        id: profile
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          echo "Active GitHub profile: $active"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Inactive GitHub profile. Remaining workflow steps are disabled."
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
       - name: Dependency review
+        if: steps.profile.outputs.run == 'true'
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
