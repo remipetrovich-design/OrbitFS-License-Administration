@@ -1,10 +1,12 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import {getGithubProfile} from '../lib/core/settings';
 
+export const dynamic='force-dynamic';
 export const metadata: Metadata = { title: 'License Manager', description: 'Independent licensing, authority, deployment and release control plane' };
 
 type GithubProfileStatus={
-  profile:'primary'|'fallback'|'unknown';
+  profile:'fallback'|'unknown';
   label:string;
   repository:string;
 };
@@ -15,12 +17,9 @@ const LOCAL_REPOSITORY='remipetrovich-design/OrbitFS-License-Administration';
 
 async function githubProfileStatus():Promise<GithubProfileStatus>{
   try{
-    const response=await fetch('https://dev.incendiarynetworks.cc/api/github-profile',{cache:'no-store',signal:AbortSignal.timeout(5000)});
-    if(!response.ok)throw new Error('Profile endpoint unavailable');
-    const body=await response.json();
-    const active=String(body?.profile||'');
+    const active=await getGithubProfile();
     if(active===LOCAL_PROFILE)return {profile:LOCAL_PROFILE,label:LOCAL_LABEL+' active',repository:LOCAL_REPOSITORY};
-    if(active==='primary'||active==='fallback')return {profile:LOCAL_PROFILE,label:LOCAL_LABEL+' inactive',repository:LOCAL_REPOSITORY};
+    return {profile:LOCAL_PROFILE,label:LOCAL_LABEL+' inactive',repository:LOCAL_REPOSITORY};
   }catch{}
   return {profile:'unknown',label:LOCAL_LABEL+' · profile unavailable',repository:LOCAL_REPOSITORY};
 }

@@ -3,6 +3,7 @@ create extension if not exists pgcrypto;
 create table if not exists system_settings (
   id boolean primary key default true,
   system_name text not null default 'License Manager',
+  github_profile text not null default 'fallback' check(github_profile in ('primary','fallback')),
   system_enabled boolean not null default true,
   licensing_enabled boolean not null default true,
   maintenance_mode boolean not null default false,
@@ -73,6 +74,9 @@ create index if not exists users_status_idx on users(status);create index if not
 create or replace function touch_updated_at() returns trigger language plpgsql as $$ begin new.updated_at=now(); return new; end $$;
 drop trigger if exists users_touch on users;create trigger users_touch before update on users for each row execute function touch_updated_at();drop trigger if exists products_touch on products;create trigger products_touch before update on products for each row execute function touch_updated_at();drop trigger if exists licenses_touch on licenses;create trigger licenses_touch before update on licenses for each row execute function touch_updated_at();
 alter table releases add column if not exists manifest jsonb not null default '{}'::jsonb;
+alter table system_settings add column if not exists github_profile text not null default 'fallback';
+alter table system_settings drop constraint if exists system_settings_github_profile_check;
+alter table system_settings add constraint system_settings_github_profile_check check(github_profile in ('primary','fallback'));
 alter table system_settings add column if not exists release_system_enabled boolean not null default true;
 alter table system_settings add column if not exists auto_technical_approval_enabled boolean not null default true;
 alter table system_settings add column if not exists deployment_enabled boolean not null default true;

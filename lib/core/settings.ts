@@ -1,6 +1,7 @@
 import { db } from '../db';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
+export type GithubProfileName='primary'|'fallback';
 export type RuntimePolicy={
   validation_ttl_seconds:number;
   offline_grace_seconds:number;
@@ -241,6 +242,39 @@ export async function setSetting(field:SettingField,value:boolean,actorUserId:st
 export async function toggleSetting(field:SettingField,actorUserId:string,actor:string) {
   const current=await getSettings();
   return setSetting(field,!Boolean(current?.[field]),actorUserId,actor);
+}
+
+export async function getGithubProfile():Promise<GithubProfileName>{
+  const current=await getSettings();
+  return String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+}
+
+export async function setGithubProfile(next:GithubProfileName,expected:GithubProfileName,actorUserId:string|null,actor:string){
+  if(next!=='primary'&&next!=='fallback')throw new Error('Invalid GitHub profile');
+  if(expected!=='primary'&&expected!=='fallback')throw new Error('Invalid current GitHub profile');
+  if(next===expected)throw new Error('Requested GitHub profile is already active');
+  const pool=db();
+  const client=await pool.connect();
+  try{
+    await client.query('begin');
+    const current=(await client.query('select system_enabled,github_profile from system_settings where id=true for update')).rows[0];
+    const actual=String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+    if(Boolean(current?.system_enabled))throw new Error('Master Authority must be OFF before changing MAIN/FALLBACK mode');
+    if(actual!==expected)throw new Error('Source mode changed since this page was loaded. Refresh before switching.');
+    const updated=(await client.query('update system_settings set github_profile=$1,updated_at=now() where id=true returning *',[next])).rows[0];
+    await client.query(
+      `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+       values($1,$2,'github_profile.changed','system_settings','github_profile',$3)`,
+      [actorUserId,actor,JSON.stringify({from:actual,to:next,master_authority_offline:true})],
+    );
+    await client.query('commit');
+    return updated;
+  }catch(error){
+    await client.query('rollback').catch(()=>{});
+    throw error;
+  }finally{
+    client.release();
+  }
 }
 
 export async function updateRuntimePolicy(input:Partial<RuntimePolicy>,actorUserId:string|null,actor:string){

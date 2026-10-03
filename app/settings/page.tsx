@@ -1,10 +1,11 @@
 import {requireUser} from '../../lib/session';
-import {getSettings,listRecentPulses,setSetting,sendPulse,updateRuntimePolicy,type SettingField} from '../../lib/core/settings';
+import {getSettings,listRecentPulses,setGithubProfile,setSetting,sendPulse,updateRuntimePolicy,type GithubProfileName,type SettingField} from '../../lib/core/settings';
 import {revalidatePath} from 'next/cache';
 import {db} from '../../lib/db';
 import SideNav from '../components/SideNav';
 import PageHeader from '../components/PageHeader';
 import AuthorityControlGrid from '../components/AuthorityControlGrid';
+import GithubProfileControl from '../components/GithubProfileControl';
 
 export const dynamic='force-dynamic';
 
@@ -36,6 +37,17 @@ async function updateSettings(formData:FormData){
  const field=String(formData.get('field')||'') as SettingField;
  if(!allowedFields.includes(field))return;
  await setSetting(field,String(formData.get('value'))==='true',user.id,user.email);
+ revalidatePath('/settings');revalidatePath('/');
+}
+
+async function switchGithubProfile(formData:FormData){
+ 'use server';
+ const user=await requireUser();if(user.role!=='owner')return;
+ const next=String(formData.get('profile')||'') as GithubProfileName;
+ const expected=String(formData.get('expected_profile')||'') as GithubProfileName;
+ if(!['primary','fallback'].includes(next)||!['primary','fallback'].includes(expected))return;
+ if(formData.get('vercel_confirmed')!=='on')throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
+ await setGithubProfile(next,expected,user.id,user.email);
  revalidatePath('/settings');revalidatePath('/');
 }
 
@@ -155,6 +167,7 @@ export default async function Settings(){
  ];
 
  const masterEnabled=Boolean(s.system_enabled);
+ const githubProfile:String='primary'===String(s.github_profile||'fallback').toLowerCase()?'primary':'fallback';
  const maintenance=masterEnabled&&Boolean(s.maintenance_mode);
  const deploymentEnabled=masterEnabled&&Boolean(s.deployment_enabled);
  const effectiveEnabled=(field:string,configured:boolean)=>{
@@ -176,6 +189,11 @@ export default async function Settings(){
    <div className="card metric-card"><div className="metric-icon icon-blue">⌁</div><div><span className="metric-label">Validation TTL</span><strong className="metric">{Number(s.validation_ttl_seconds||5400)}s</strong><small>Pulse poll {Number(s.pulse_poll_seconds||5400)}s</small></div></div>
    <div className="card metric-card"><div className="metric-icon icon-indigo">#</div><div><span className="metric-label">Pulse revision</span><strong className="metric">{Number(s.pulse_revision||0)}</strong><small>{s.pulse_at?new Date(s.pulse_at).toLocaleString():'No pulse recorded'}</small></div></div>
   </div>
+
+  <section className="section">
+   <div className="section-head"><div><div className="eyebrow">Source authority</div><h2>MAIN / FALLBACK</h2><p className="muted">This switch owns the active GitHub source family. It is locked until External authority / master shutdown is OFF.</p></div></div>
+   <GithubProfileControl profile={githubProfile as 'primary'|'fallback'} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}/>
+  </section>
 
   <section className="section">
    <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">Hardware-style authority controls. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>

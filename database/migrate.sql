@@ -11,6 +11,9 @@ create table if not exists user_sessions (
   id uuid primary key default gen_random_uuid(), user_id uuid not null references users(id) on delete cascade,
   token_hash text unique not null, expires_at timestamptz not null, created_at timestamptz not null default now(), last_seen_at timestamptz not null default now(), user_agent text, ip_address text
 );
+alter table if exists system_settings add column if not exists github_profile text not null default 'fallback';
+alter table if exists system_settings drop constraint if exists system_settings_github_profile_check;
+alter table if exists system_settings add constraint system_settings_github_profile_check check(github_profile in ('primary','fallback'));
 alter table if exists system_settings add column if not exists release_system_enabled boolean not null default true;
 alter table if exists system_settings add column if not exists auto_technical_approval_enabled boolean not null default true;
 alter table if exists system_settings add column if not exists deployment_enabled boolean not null default true;

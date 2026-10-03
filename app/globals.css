@@ -445,3 +445,41 @@ details[open]>.managed-record-summary .collapse-chevron{transform:rotate(180deg)
  .authority-hardware-cell h3{font-size:13px}
  .authority-hardware-control{min-height:104px}
 }
+
+
+/* MAIN / FALLBACK source mode hardware panel */
+.github-mode-panel{position:relative;max-width:1040px;margin:0 auto 16px;padding:18px;border:1px solid #07090c;border-radius:22px;background:linear-gradient(145deg,#171a1f 0%,#090b0f 46%,#111419 100%);box-shadow:inset 0 0 0 2px #2c3037,inset 0 0 34px rgba(255,255,255,.025),0 18px 44px rgba(17,24,39,.16);color:#f7f8fa;overflow:hidden}
+.github-mode-panel:before{content:"";position:absolute;inset:7px;border:1px solid rgba(255,255,255,.28);border-radius:16px;pointer-events:none}
+.github-mode-inner{position:relative;z-index:2;padding:4px 42px 8px}
+.github-mode-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:4px 0 14px;border-bottom:2px solid rgba(245,247,250,.72)}
+.github-mode-heading>div:first-child>span,.github-mode-modal-head span{display:block;font-size:9px;font-weight:850;letter-spacing:.14em;color:#aeb6c2}
+.github-mode-heading h2{margin:4px 0 5px!important;font-size:22px!important;letter-spacing:.06em!important;color:#fff;text-shadow:0 1px 2px #000}
+.github-mode-heading p{margin:0;max-width:660px;color:#a9b0bb;font-size:10px;line-height:1.45}
+.github-mode-status{display:grid;gap:2px;min-width:150px;padding:8px 10px;border:1px solid #444a53;border-radius:8px;background:#0d1014;text-align:right}
+.github-mode-status strong{font-size:10px;letter-spacing:.08em}.github-mode-status small{font-size:8px;color:#929ba8}
+.github-mode-status.ready{border-color:#235f38;box-shadow:inset 0 0 18px rgba(24,197,82,.07)}.github-mode-status.ready strong{color:#55ef88}
+.github-mode-status.blocked{border-color:#71313a;box-shadow:inset 0 0 18px rgba(233,42,56,.08)}.github-mode-status.blocked strong{color:#ff6672}
+.github-mode-console{min-height:185px;display:grid;grid-template-columns:1fr 130px 1fr;align-items:center;gap:18px;padding:18px 8% 10px}
+.github-mode-side{display:flex;flex-direction:column;align-items:center;gap:5px;opacity:.72;transition:.18s ease}
+.github-mode-side.is-active{opacity:1}
+.github-mode-side strong{font-size:17px;letter-spacing:.08em;text-shadow:0 1px 2px #000}.github-mode-side small{font-size:9px;color:#9aa3af}
+.github-mode-lamp{width:54px;height:54px;border-radius:50%;border:3px solid #050607;box-shadow:inset 0 -7px 12px rgba(0,0,0,.44),inset 0 4px 8px rgba(255,255,255,.26),0 0 0 2px #2c3035,0 4px 10px rgba(0,0,0,.65)}
+.github-mode-lamp.is-green{background:radial-gradient(circle at 38% 30%,#d9ffe5 0 5%,#59ff8c 8% 22%,#11d853 42%,#079138 70%,#034d20 100%);box-shadow:inset 0 -7px 12px rgba(0,0,0,.38),inset 0 4px 8px rgba(255,255,255,.38),0 0 0 2px #25332a,0 0 18px rgba(34,239,105,.58),0 4px 10px rgba(0,0,0,.65)}
+.github-mode-lamp.is-red{background:radial-gradient(circle at 38% 30%,#ffd9dc 0 5%,#ff646e 8% 22%,#ed1f2d 42%,#a20c16 70%,#55050b 100%);box-shadow:inset 0 -7px 12px rgba(0,0,0,.42),inset 0 4px 8px rgba(255,255,255,.3),0 0 0 2px #352426,0 0 15px rgba(239,39,51,.46),0 4px 10px rgba(0,0,0,.65)}
+.github-mode-lever{position:relative;width:118px;height:126px;border:0;background:transparent;cursor:pointer}
+.github-mode-lever:disabled{cursor:not-allowed;opacity:.48;filter:saturate(.6)}
+.github-mode-lever-slot{position:absolute;left:29px;top:22px;width:60px;height:82px;border-radius:34px;background:radial-gradient(ellipse at center,#242629 0 26%,#a4a19c 28% 39%,#4a4846 42% 55%,#111214 58% 100%);border:1px solid #050606;box-shadow:0 4px 8px rgba(0,0,0,.78),inset 0 2px 2px rgba(255,255,255,.22)}
+.github-mode-lever-stick{position:absolute;left:53px;width:13px;height:68px;border-radius:8px;background:linear-gradient(90deg,#55524f 0%,#f0ebe4 30%,#7a7671 59%,#242526 100%);border:1px solid #151515;box-shadow:0 4px 7px rgba(0,0,0,.74),inset 2px 0 2px rgba(255,255,255,.42);transform-origin:50% 50%;transition:.2s ease}
+.github-mode-lever-cap{position:absolute;left:46px;width:27px;height:27px;border-radius:50%;background:radial-gradient(circle at 36% 30%,#f9f7f2 0 8%,#b8b3ad 18%,#4c4a48 58%,#171819 100%);border:1px solid #0a0a0a;box-shadow:0 3px 5px rgba(0,0,0,.7);transition:.2s ease}
+.github-mode-lever.points-up .github-mode-lever-stick{top:6px;transform:rotate(8deg)}.github-mode-lever.points-up .github-mode-lever-cap{top:1px}
+.github-mode-lever.points-down .github-mode-lever-stick{bottom:5px;transform:rotate(-8deg)}.github-mode-lever.points-down .github-mode-lever-cap{bottom:0}
+.github-mode-footer{display:flex;justify-content:space-between;gap:18px;padding-top:12px;border-top:2px solid rgba(245,247,250,.72);font-size:9px;line-height:1.4}
+.github-mode-footer strong{color:#f8fafc;letter-spacing:.08em}.github-mode-footer span{color:#9aa3af;text-align:right}
+.github-mode-modal-backdrop{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:20px;background:rgba(3,5,8,.78);backdrop-filter:blur(3px)}
+.github-mode-modal{width:min(650px,100%);max-height:calc(100vh - 40px);overflow:auto;border:1px solid #31363d;border-radius:15px;padding:18px;background:#111419;color:#f7f8fa;box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.github-mode-modal-head{padding-bottom:12px;border-bottom:1px solid #2f343b}.github-mode-modal-head h3{margin:4px 0 0;font-size:20px}
+.github-mode-warning{margin-top:14px;padding:12px;border:1px solid #7b5b1c;border-radius:10px;background:#241d0d}.github-mode-warning strong{font-size:11px;color:#ffd067}.github-mode-warning p{margin:5px 0 0;font-size:10px;line-height:1.45;color:#d5c7a7}
+.github-mode-map{display:grid;gap:6px;margin-top:12px}.github-mode-map>div{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:center;padding:8px 9px;border:1px solid #2d3238;border-radius:8px;background:#0c0f13}.github-mode-map span{font-size:9px;color:#9ba4b1}.github-mode-map code{font-size:9px;color:#eef1f5;overflow-wrap:anywhere}
+.github-mode-confirm-check{display:flex;align-items:flex-start;gap:9px;margin-top:14px;padding:11px;border:1px solid #383e46;border-radius:9px;background:#0c0f13}.github-mode-confirm-check input{margin-top:2px;accent-color:#5b5cf0}.github-mode-confirm-check span{display:grid;gap:2px}.github-mode-confirm-check strong{font-size:10px}.github-mode-confirm-check small{font-size:8px;color:#98a1ad}
+.github-mode-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+@media(max-width:680px){.github-mode-inner{padding-inline:26px}.github-mode-heading{display:grid}.github-mode-status{text-align:left}.github-mode-console{grid-template-columns:1fr 100px 1fr;padding-inline:0}.github-mode-side strong{font-size:14px}.github-mode-footer{display:grid}.github-mode-footer span{text-align:left}.github-mode-map>div{grid-template-columns:1fr}}
