@@ -18,7 +18,7 @@ jobs:
           EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://incendiarynetworks.cc/api/v1/github-profile)"
           active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
           echo "Active GitHub profile: $active"
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
