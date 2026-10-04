@@ -12,24 +12,18 @@ const DESTRUCTIVE_SQL=/\b(?:drop\s+table|drop\s+schema|truncate\s+(?:table\s+)?|
 const TRANSACTION_SQL=/\b(?:begin|commit|rollback)\s*;/i;
 
 const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
-  base:['lucaskerim123/V1-vercel-base','remipetrovich-design/OrbitFS-Base-System'],
-  'engine-shared':['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
-  mcp:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
-  apex:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine'],
-  studio:['lucaskerim123/V1-vercel-engine','remipetrovich-design/OrbitFS_Engine']
+  base:['remipetrovich-design/OrbitFS-Base-System'],
+  'engine-shared':['remipetrovich-design/OrbitFS_Engine'],
+  mcp:['remipetrovich-design/OrbitFS_Engine'],
+  apex:['remipetrovich-design/OrbitFS_Engine'],
+  studio:['remipetrovich-design/OrbitFS_Engine']
 };
 const LOCAL_DATABASE_SOURCE_REPOS=[...new Set(Object.values(SOURCE_REPOS).flat())];
 
-function assertSourceRepoForComponent(value:CustomerDatabaseComponent,sourceRepoValue:string){
-  const repo=String(sourceRepoValue||'').trim();
-  if(!SOURCE_REPOS[value].includes(repo))throw new Error('DATABASE_PACKAGE_SOURCE_REPO_INVALID');
+function localSourceRepoForComponent(value:CustomerDatabaseComponent){
+  const repo=SOURCE_REPOS[value][0];
+  if(!repo)throw new Error('DATABASE_PACKAGE_SOURCE_REPO_UNCONFIGURED');
   return repo;
-}
-
-function defaultSourceRepoForComponent(value:CustomerDatabaseComponent){
-  const profile=String(process.env.ORBITFS_GITHUB_PROFILE||process.env.GITHUB_PROFILE||'').trim().toLowerCase();
-  const index=['fallback','secondary','remi'].includes(profile)?1:0;
-  return SOURCE_REPOS[value][index]||SOURCE_REPOS[value][0];
 }
 
 const MIGRATION_PATHS:Record<CustomerDatabaseComponent,RegExp>={
@@ -62,7 +56,7 @@ export function validateDatabasePackage(input:any){
   if(String(input.databaseTarget||'').trim().toLowerCase()!=='customer')throw new Error('DATABASE_PACKAGE_TARGET_INVALID');
 
   const sourceRepo=String(input.sourceRepo||'').trim();
-  assertSourceRepoForComponent(selected,sourceRepo);
+  if(!SOURCE_REPOS[selected].includes(sourceRepo))throw new Error('DATABASE_PACKAGE_SOURCE_REPO_INVALID');
 
   const sourceCommit=String(input.sourceCommit||'').trim().toLowerCase();
   if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error('DATABASE_PACKAGE_SOURCE_COMMIT_INVALID');
@@ -198,7 +192,7 @@ export async function publishDatabasePackage(id:string,actor:string){
     const candidate=(await client.query('select * from database_packages where id=$1 for update',[id])).rows[0];
 
     if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
-    assertSourceRepoForComponent(component(candidate.component),String(candidate.source_repo||''));
+    if(String(candidate.source_repo||'')!==localSourceRepoForComponent(component(candidate.component)))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
     if(candidate.status==='current'){
       await client.query('commit');
       return candidate;
@@ -248,12 +242,11 @@ export async function listDatabasePackages(componentFilter?:string){
   )).rows;
 }
 
-export async function getCurrentDatabasePackage(componentValue:string,sourceRepoValue?:string|null){
+export async function getCurrentDatabasePackage(componentValue:string){
   const selected=component(componentValue);
-  const sourceRepo=sourceRepoValue?assertSourceRepoForComponent(selected,sourceRepoValue):defaultSourceRepoForComponent(selected);
   return (await db().query(
     "select * from database_packages where component=$1 and source_repo=$2 and database_target='customer' and status='current' limit 1",
-    [selected,sourceRepo]
+    [selected,localSourceRepoForComponent(selected)]
   )).rows[0]||null;
 }
 
