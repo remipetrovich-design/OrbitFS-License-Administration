@@ -5,7 +5,7 @@ import { requireReleaseChannel } from './release-channels';
 import { compareOrbitReleaseVersions, isOrbitReleaseVersion, orbitReleaseVersionFamily } from './versioning';
 import { publishReleaseDatabasePackages, validateReleaseDatabasePackages } from './database-packages';
 
-const ALLOWED_UPDATE_COMPONENTS = new Set(['base', 'mcp', 'apex', 'studio']);
+const ALLOWED_UPDATE_COMPONENTS = new Set(['mcp', 'apex', 'studio']);
 const MAX_ARTIFACT_BYTES = 75 * 1024 * 1024;
 const FORBIDDEN_PATHS = /(^|\/)(\.env(?:$|\.(?!example$))|\.git(?:\/|$)|node_modules(?:\/|$)|\.vercel(?:\/|$))/i;
 const BASE_DATABASE_RUNTIME_ACCESS_CONTRACT={
@@ -162,15 +162,13 @@ async function scanPackage(row:any,bytes:Buffer){
       const recordComponents=canonicalComponents(row.manifest?.components,'update');
       const validTargets=components.length>0&&components.every((x:string)=>ALLOWED_UPDATE_COMPONENTS.has(x));
       const componentRecordMatches=[...components].sort().join(',')===[...recordComponents].sort().join(',');
-      const baseTarget=components.includes('base');
-      const engineTargets=components.filter((component:string)=>component!=='base');
+      const engineTargets=components;
       const panel=pkg?.payloads?.panel??null;
       const engine=pkg?.payloads?.engine??null;
       const protocol=Number(pkg.minimumUpdaterProtocol??pkg.minimumEngineDeployerProtocol);
       const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&(!engineTargets.length||(Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true));
       const componentVersions=pkg.componentVersions&&typeof pkg.componentVersions==='object'&&!Array.isArray(pkg.componentVersions)?pkg.componentVersions:null;
       const componentVersionsValid=Boolean(componentVersions&&components.every((component:string)=>{
-        if(component==='base')return true;
         const value=String(componentVersions[component]||'').trim();
         return validReleaseVersion(value);
       })&&Object.keys(componentVersions).every((key)=>components.includes(String(key))));
@@ -198,7 +196,7 @@ async function scanPackage(row:any,bytes:Buffer){
       if(schemaChanged&&changedMigrationCount<1)migrationsValid=false;
       const engineDatabaseOk=!engine||JSON.stringify(engine.database||null)===JSON.stringify(database);
       const databaseOk=migrationsValid&&engineDatabaseOk;
-      const legacyUpdateContract=!baseTarget&&pkg.updateScope==='engine-components-only-v1'&&pkg.executor==='orbitfs-base-inner-deployer-v1';
+      const legacyUpdateContract=pkg.updateScope==='engine-components-only-v1'&&pkg.executor==='orbitfs-base-inner-deployer-v1';
       const updateScopeOk=((pkg.updateScope==='deployed-system-v2'&&pkg.executor==='orbitfs-updater-v2')||legacyUpdateContract)&&!pkg.baseBaseline;
       checks.push({key:'package_manifest',ok:Boolean(pkg.version&&pkg.sourceCommit&&validTargets&&componentRecordMatches&&componentVersionsValid&&pkg.payloads&&typeof pkg.payloads==='object'&&updateScopeOk),message:'Update bundle identity, deployed-system targets, component versions and updater execution contract are '+(pkg.version&&pkg.sourceCommit&&validTargets&&componentRecordMatches&&componentVersionsValid&&updateScopeOk?'valid.':'invalid.')});
       checks.push({key:'package_update_scope',ok:updateScopeOk,message:updateScopeOk?(pkg.executor==='orbitfs-updater-v2'?'Update is owned by the standalone OrbitFS Updater.':'Legacy published Update contract is accepted for compatibility.'):'Update scope/executor does not match the standalone Updater contract.'});
@@ -207,10 +205,8 @@ async function scanPackage(row:any,bytes:Buffer){
       checks.push({key:'package_update_sequence_targets',ok:invalidMigrationSequenceTargets.length===0,message:invalidMigrationSequenceTargets.length?`Update migration SQL contains invalid setval() sequence target(s): ${invalidMigrationSequenceTargets.slice(0,5).join(', ')}.`:'Update migration setval() targets do not reference primary/unique constraints.'});
       checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, Updater protocol and rollback contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
 
-      const panelOk=baseTarget
-        ?Boolean(panel&&typeof panel==='object'&&Array.isArray(panel.files)&&panel.files.length>0)
-        :panel===null||panel===undefined;
-      checks.push({key:'package_panel_payload',ok:panelOk,message:baseTarget?(panelOk?'Base/inner-deployer payload is present for the deployed-system Update.':'Base-targeting Update requires a Base/Panel payload.'):(panelOk?'No Base payload is present for this Engine/addon Update.':'Update declares no Base target but contains a Base/Panel payload.')});
+      const panelOk=panel===null||panel===undefined;
+      checks.push({key:'package_panel_payload',ok:panelOk,message:panelOk?'Update release contains no Base payload.':'Base payloads belong to the Base Deployer/Base Updater, not the Update Release System.'});
 
       const rawEngineComponents=engine?canonicalComponents(engine.components,'update'):[];
       const engineHasBase=rawEngineComponents.includes('base');
