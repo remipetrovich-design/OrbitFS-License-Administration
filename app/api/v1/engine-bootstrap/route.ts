@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const REPO = 'remipetrovich-design/OrbitFS_Engine';
-const BRANCH = 'main';
+const BRANCH = 'UPDATE_RELEASE';
 const MAX_FILES = 5000;
 const MAX_UNPACKED = 210 * 1024 * 1024;
 const MAX_ARCHIVE = 75 * 1024 * 1024;
