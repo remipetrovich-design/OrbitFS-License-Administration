@@ -58,7 +58,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
 
     <div className="github-mode-console">
      <div className={`github-mode-side ${profile==='primary'?'is-active':''}`}>
-      <span className={`github-mode-lamp ${profile==='primary'?'is-green':'is-red'}`} aria-hidden="true"/>
+      <span className="github-mode-lamp is-green" aria-hidden="true"/>
       <strong>MAIN</strong>
       <small>lucaskerim123</small>
      </div>
@@ -76,7 +76,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
      </button>
 
      <div className={`github-mode-side ${profile==='fallback'?'is-active':''}`}>
-      <span className={`github-mode-lamp ${profile==='fallback'?'is-green':'is-red'}`} aria-hidden="true"/>
+      <span className="github-mode-lamp is-red" aria-hidden="true"/>
       <strong>FALLBACK</strong>
       <small>remipetrovich-design</small>
      </div>
