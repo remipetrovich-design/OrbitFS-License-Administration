@@ -166,7 +166,7 @@ async function scanPackage(row:any,bytes:Buffer){
       const engineTargets=components.filter((component:string)=>component!=='base');
       const panel=pkg?.payloads?.panel??null;
       const engine=pkg?.payloads?.engine??null;
-      const protocol=Number(pkg.minimumEngineDeployerProtocol);
+      const protocol=Number(pkg.minimumUpdaterProtocol??pkg.minimumEngineDeployerProtocol);
       const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&(!engineTargets.length||(Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true));
       const componentVersions=pkg.componentVersions&&typeof pkg.componentVersions==='object'&&!Array.isArray(pkg.componentVersions)?pkg.componentVersions:null;
       const componentVersionsValid=Boolean(componentVersions&&components.every((component:string)=>{
@@ -205,7 +205,7 @@ async function scanPackage(row:any,bytes:Buffer){
       checks.push({key:'package_components_match',ok:componentRecordMatches,message:componentRecordMatches?'Release record components exactly match the packaged Update targets.':'Release record components do not match the packaged Update targets.'});
       checks.push({key:'package_update_schema',ok:databaseOk,message:databaseOk?(migrations.length?`Customer database migration contract contains ${migrations.length} verified immutable migration(s).`:'Update release has a valid empty customer database migration contract.'):'Update database/schema changes require a valid checksummed orbitfs-db-migrations-v1 contract that matches the Engine payload.'});
       checks.push({key:'package_update_sequence_targets',ok:invalidMigrationSequenceTargets.length===0,message:invalidMigrationSequenceTargets.length?`Update migration SQL contains invalid setval() sequence target(s): ${invalidMigrationSequenceTargets.slice(0,5).join(', ')}.`:'Update migration setval() targets do not reference primary/unique constraints.'});
-      checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, deployer protocol and checkpoint contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
+      checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, Updater protocol and rollback contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
 
       const panelOk=baseTarget
         ?Boolean(panel&&typeof panel==='object'&&Array.isArray(panel.files)&&panel.files.length>0)
@@ -218,7 +218,7 @@ async function scanPackage(row:any,bytes:Buffer){
       const expectedEngine=[...engineTargets].sort().join(',');
       const actualEngine=[...engineComponents].sort().join(',');
       const engineFormat=engine&&['orbitfs-engine-release-v2','orbitfs-engine-release-v3'].includes(String(engine.format||''));
-      const engineOk=!engineTargets.length?(engine===null||engine===undefined):Boolean(engine&&!engineHasBase&&engineFormat&&String(engine.version||'')===String(pkg.version||'')&&String(engine.sourceCommit||'')===String(pkg.sourceCommit||'')&&String(engine.minimumBaseVersion||'')===String(pkg.minimumBaseVersion||'')&&Number(engine.minimumEngineDeployerProtocol)===protocol&&engine.checkpointRequired===true&&actualEngine===expectedEngine);
+      const engineOk=!engineTargets.length?(engine===null||engine===undefined):Boolean(engine&&!engineHasBase&&engineFormat&&String(engine.version||'')===String(pkg.version||'')&&String(engine.sourceCommit||'')===String(pkg.sourceCommit||'')&&String(engine.minimumBaseVersion||'')===String(pkg.minimumBaseVersion||'')&&Number(engine.minimumUpdaterProtocol??engine.minimumEngineDeployerProtocol)===protocol&&engine.checkpointRequired===true&&actualEngine===expectedEngine);
       checks.push({key:'package_engine_payload',ok:engineOk,message:engineTargets.length?(engineOk?'Engine/add-on targets have a valid Engine Host payload.':'Engine/add-on targets require a matching Engine Host payload.'):(engine===null?'No Engine payload is present for a Base-only update.':'Engine payload must be null when no Engine/add-on target is selected.')});
 
       let total=0;
