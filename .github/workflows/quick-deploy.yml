@@ -145,9 +145,22 @@ jobs:
 
       - name: Generate complete since-last-deploy change manifest
         if: steps.profile.outputs.deploy == 'true'
+        id: change_manifest
         env:
           RELEASE_BASE_SHA: ${{ steps.production_state.outputs.deployed_sha }}
-        run: node scripts/release-manifest.mjs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release-manifest.mjs
+          changed_file_count="$(node -e 'const m=require("./release-manifest.json"); process.stdout.write(String(m.changedFileCount ?? 0))')"
+          echo "changed_file_count=$changed_file_count" >> "$GITHUB_OUTPUT"
+          if [ "$changed_file_count" -gt 0 ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No file changes exist between the previous production deployment and $GITHUB_SHA."
+            echo "Quick Deploy will reuse production instead of consuming a Vercel deployment."
+          fi
 
       - name: Upload quick-deploy change manifest
         if: steps.profile.outputs.deploy == 'true'
@@ -159,17 +172,17 @@ jobs:
           retention-days: 90
 
       - name: Install pinned Vercel CLI
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         run: |
           npm install --global "vercel@$VERCEL_CLI_VERSION"
           vercel --version
 
       - name: Pull production configuration only
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Verify pulled production project identity
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -182,11 +195,11 @@ jobs:
           NODE
 
       - name: Build quick-deploy artifact without deploying
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Verify quick-deploy artifact locally
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -199,7 +212,7 @@ jobs:
           NODE
 
       - name: Deploy quick artifact to production
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         id: deploy
         shell: bash
         run: |
@@ -222,6 +235,13 @@ jobs:
           echo "Branch: main"
           echo "Commit: $GITHUB_SHA"
           echo "Deployment: $deployment_url"
+
+      - name: Skip no-op deployment
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes != 'true') }}
+        run: |
+          echo "Quick deployment not required because the selected commit has no file changes since the previous production deployment."
+          echo "Commit: $GITHUB_SHA"
+          echo "Changed files: ${{ steps.change_manifest.outputs.changed_file_count }}"
 
       - name: Reuse existing production deployment
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
