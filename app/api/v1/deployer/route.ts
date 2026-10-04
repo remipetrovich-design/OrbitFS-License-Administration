@@ -170,7 +170,7 @@ export async function POST(request:Request){
   }
   const releaseManifest=release.manifest&&typeof release.manifest==='object'?release.manifest:{};
   const updatePath=action==='update'||updateRollback;
-  const allowedUpdateComponents=new Set(['base','apex','mcp','studio']);
+  const allowedUpdateComponents=new Set(['apex','mcp','studio']);
   const rawReleaseComponents:string[]=[...new Set<string>((Array.isArray(releaseManifest.components)?releaseManifest.components:[])
     .map((value:any)=>String(value||'').trim().toLowerCase())
     .map((value:string)=>value==='orbitfs_mcp'?'mcp':value==='orbitfs_apex'?'apex':value==='orbitfs_studio'?'studio':value==='orbitfs_base'||value==='core'?'base':value)
@@ -185,7 +185,7 @@ export async function POST(request:Request){
     ?license.metadata.license_policy:{};
   const entitlementMap=policy.components&&typeof policy.components==='object'?policy.components:{};
   const licenseComponent=String(license.component||'').trim().toLowerCase();
-  const entitledComponents:string[]=(updatePath?['base','apex','mcp','studio']:['base']).filter((component:string)=>{
+  const entitledComponents:string[]=(updatePath?['apex','mcp','studio']:['base']).filter((component:string)=>{
     if(component==='base')return licenseComponent==='orbitfs_base'||Boolean(entitlementMap.orbitfs_base);
     return Boolean(entitlementMap['orbitfs_'+component]);
   });
