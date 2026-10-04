@@ -38,12 +38,7 @@ export async function GET(request:Request,{params}:{params:Promise<{key:string}>
     }
   }
 
-  const requestedSourceRepo=request.headers.get('x-orbitfs-source-repo')?.trim()||null;
-  let row:any;
-  try{row=await getCurrentDatabasePackage(component,requestedSourceRepo)}catch(error:any){
-    const code=String(error?.message||'DATABASE_PACKAGE_SOURCE_REPO_INVALID');
-    return NextResponse.json({ok:false,code},{status:400});
-  }
+  const row=await getCurrentDatabasePackage(component);
   if(!row)return NextResponse.json({ok:false,code:'DATABASE_PACKAGE_NOT_FOUND'},{status:404});
   return NextResponse.json({
     ok:true,
