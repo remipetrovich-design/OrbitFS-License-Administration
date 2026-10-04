@@ -33,7 +33,8 @@ const LOCAL_BASE_REF='base-release';
 const LOCAL_ENGINE_REPO='remipetrovich-design/OrbitFS_Engine';
 const LOCAL_ENGINE_REF='UPDATE_RELEASE';
 const LOCAL_SOURCE_REPOS=[LOCAL_BASE_REPO,LOCAL_ENGINE_REPO] as const;
-const LOCAL_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Control-Centre';
+const LOCAL_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Base-System';
+const LEGACY_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Control-Centre';
 const LOCAL_GITHUB_TOKEN_ENV='ORBITFS_FALLBACK_GITHUB_TOKEN';
 function expectedReleaseSource(releaseType:unknown){
  return String(releaseType||'').toLowerCase()==='base'
@@ -51,8 +52,14 @@ function assertLocalReleaseRow(row:any){
 }
 function expectedReleaseArtifactRepo(releaseType:unknown){
  return String(releaseType||'').toLowerCase()==='base'
-  ? 'remipetrovich-design/OrbitFS-Control-Centre'
-  : 'remipetrovich-design/OrbitFS_Engine';
+  ? LOCAL_BASE_ARTIFACT_REPO
+  : LOCAL_ENGINE_REPO;
+}
+function releaseArtifactRepoAllowed(releaseType:unknown,value:unknown){
+ const artifactRepo=String(value||'').trim();
+ return String(releaseType||'').toLowerCase()==='base'
+  ? artifactRepo===LOCAL_BASE_ARTIFACT_REPO||artifactRepo===LEGACY_BASE_ARTIFACT_REPO
+  : artifactRepo===LOCAL_ENGINE_REPO;
 }
 
 function authoritativeDatabaseRuntimeAccess(){
@@ -548,7 +555,7 @@ export async function createRelease(input:{productId:string;channel:string;versi
  const expectedSource=expectedReleaseSource(input.releaseType);
  if(String(input.sourceRepo||'').trim()!==expectedSource.repo||String(input.sourceRef||'').trim()!==expectedSource.ref)throw new Error(`Release source must stay on this GitHub system: ${expectedSource.repo}@${expectedSource.ref}`);
  const expectedArtifactRepo=expectedReleaseArtifactRepo(input.releaseType);
- if(String(input.artifactRepo||'').trim()!==expectedArtifactRepo)throw new Error(`Release artifact repository must stay on this GitHub system: ${expectedArtifactRepo}`);
+ if(!releaseArtifactRepoAllowed(input.releaseType,input.artifactRepo))throw new Error(`Release artifact repository must stay on this GitHub system: ${expectedArtifactRepo}`);
  const settings=(await pool.query('select system_enabled,release_system_enabled,deployment_enabled from system_settings where id=true')).rows[0];
  if(!settings?.system_enabled||!settings.release_system_enabled||(input.releaseType==='base'&&!settings.deployment_enabled))throw new Error('Release/deployment system is offline');
  if(!isOrbitReleaseVersion(input.version))throw new Error('Invalid OrbitFS release version. Use a numeric version such as 1.0.0, v1.0.0.0, v.1.0.0, B0.0.0 or D.0.0.0.');
@@ -684,9 +691,9 @@ export async function createRelease(input:{productId:string;channel:string;versi
 }
 async function validateSourceIdentity(row:any){
  const expected=expectedReleaseSource(row.release_type);
- const expectedArtifactRepo=String(row.release_type||'').toLowerCase()==='base'?LOCAL_BASE_ARTIFACT_REPO:expected.repo;
+ const expectedArtifactRepo=expectedReleaseArtifactRepo(row.release_type);
  const sourceRepo=String(row.source_repo||'').trim(),ref=String(row.source_ref||'').trim(),sha=String(row.source_sha||'').trim(),artifactRepo=String(row.artifact_repo||'').trim();
- const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&artifactRepo===expectedArtifactRepo;
+ const ok=sourceRepo===expected.repo&&ref===expected.ref&&/^[a-f0-9]{40}$/i.test(sha)&&releaseArtifactRepoAllowed(row.release_type,artifactRepo);
  return {key:'source_identity',ok,message:ok?`Source identity is authoritative and system-local: ${sourceRepo}@${ref}; artifact ${artifactRepo} (${sha.slice(0,8)}).`:`Expected source ${expected.repo}@${expected.ref} and artifact repository ${expectedArtifactRepo}, with a full commit SHA.`};
 }
 async function validateUpdateBaseCompatibility(row:any){
