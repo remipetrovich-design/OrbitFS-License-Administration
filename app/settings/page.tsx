@@ -108,15 +108,13 @@ async function resetReleaseLab(formData:FormData){
  const client=await pool.connect();
  try{
   await client.query('begin');
-  const releaseCount=Number((await client.query("select count(*)::int count from releases where archived_at is null")).rows[0]?.count||0);
+  const releaseCount=Number((await client.query("select count(*)::int count from releases where lower(status)<>'published'")).rows[0]?.count||0);
+  const publishedPreserved=Number((await client.query("select count(*)::int count from releases where lower(status)='published'")).rows[0]?.count||0);
   const deploymentEventCount=Number((await client.query("select count(*)::int count from deployment_events where action in ('deploy','base_update','update','redeploy','rollback')")).rows[0]?.count||0);
   const activationCount=Number((await client.query("select count(*)::int count from activations where product_version is not null or last_deployment_id is not null or last_deployment_url is not null or deployment_count<>0 or coalesce(current_components,'{}'::jsonb)<>'{}'::jsonb")).rows[0]?.count||0);
 
   await client.query("delete from deployment_events where action in ('deploy','base_update','update','redeploy','rollback')");
-  await client.query(
-    "update releases set status=case when status='published' then 'withdrawn' else case when status='draft' then 'disabled' else status end end, archived_at=coalesce(archived_at,now()), archived_by=coalesce(archived_by,$1::uuid) where archived_at is null",
-    [user.id]
-  );
+  await client.query("delete from releases where lower(status)<>'published'");
   await client.query(`update activations
     set product_version=null,
         last_deployment_id=null,
@@ -229,10 +227,10 @@ export default async function Settings(){
 
 
   {user.role==='owner'&&<section className="section card">
-   <div className="section-head"><div><div className="eyebrow">Danger zone</div><h2>Release lab reset</h2><p className="muted">Use this only when the Base/Update release pipeline has finished testing and you want a clean production starting point. It archives and disables current License Manager Base/Update release records, clears deployment/update event history and activation deployment/version summaries, and allows the next clean release line to start at v1.0.0. Release manifests, source/artifact identity and rollback history are preserved. It does not delete customer Supabase/Vercel resources, licences, users, channels or audit history.</p></div><span className="badge">OWNER ONLY</span></div>
+   <div className="section-head"><div><div className="eyebrow">Danger zone</div><h2>Release lab reset</h2><p className="muted">Deletes every License Manager Base/Update release record that is not currently published, clears deployment/update event history and activation deployment/version summaries, and leaves currently published releases untouched. It does not delete customer Supabase/Vercel resources, licences, users, channels or audit history.</p></div><span className="badge">OWNER ONLY</span></div>
    <form action={resetReleaseLab} className="policy-grid">
-    <label className="toggle-line"><input type="checkbox" name="confirmation" required/><span><b>I understand this resets current Base/Update state while preserving archived release history</b><small>Release records are archived rather than deleted. Customer Supabase/Vercel resources, licences, users, channels and audit history are not deleted.</small></span></label>
-    <div className="policy-submit"><button className="button danger">Reset release/deployment history</button></div>
+    <label className="toggle-line"><input type="checkbox" name="confirmation" required/><span><b>I understand this permanently deletes every release that is not currently published</b><small>Currently published releases remain protected. Customer Supabase/Vercel resources, licences, users, channels and audit history are not deleted.</small></span></label>
+    <div className="policy-submit"><button className="button danger">Clear non-published release/deployment state</button></div>
    </form>
   </section>}
 
