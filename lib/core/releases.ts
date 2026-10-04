@@ -206,9 +206,9 @@ async function scanPackage(row:any,bytes:Buffer){
       checks.push({key:'package_update_sequence_targets',ok:invalidMigrationSequenceTargets.length===0,message:invalidMigrationSequenceTargets.length?`Update migration SQL contains invalid setval() sequence target(s): ${invalidMigrationSequenceTargets.slice(0,5).join(', ')}.`:'Update migration setval() targets do not reference primary/unique constraints.'});
       checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, Updater protocol and rollback contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
 
-      const panelDeletePaths=Array.isArray(panel?.deletePaths)?panel.deletePaths.map((value:any)=>String(value||'').replaceAll('\\\\','/')):[];
+      const panelDeletePaths=Array.isArray(panel?.deletePaths)?panel.deletePaths.map((value:any)=>String(value||'').replaceAll('\\','/')):[];
       const panelFiles=Array.isArray(panel?.files)?panel.files:[];
-      const panelPathSafe=(value:string)=>Boolean(value)&&!value.startsWith('/')&&!value.includes('..')&&!/(^|\\/)(?:\\.git|\\.vercel|node_modules)(?:\\/|$)/i.test(value);
+      const panelPathSafe=(value:string)=>Boolean(value)&&!value.startsWith('/')&&!value.includes('..')&&!/(^|\/)(?:\.git|\.vercel|node_modules)(?:\/|$)/i.test(value);
       const panelIdentityOk=!baseTarget
         ?panel===null||panel===undefined
         :Boolean(panel&&panel.format==='orbitfs-base-update-patch-v1'&&Number(panel.schemaVersion)===1&&String(panel.version||'')===String(pkg.version||'')&&String(panel.sourceCommit||'')===String(pkg.sourceCommit||'')&&(panelFiles.length>0||panelDeletePaths.length>0)&&panelDeletePaths.every(panelPathSafe));
@@ -238,7 +238,8 @@ async function scanPackage(row:any,bytes:Buffer){
         total+=inspected.list.length;
         checks.push({key:'package_engine_file_count',ok:Number(engine.fileCount||0)===inspected.list.length,message:`Engine payload declares ${Number(engine.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
       }
-      const patchOperationCount=panelDeletePaths.length;\n      checks.push({key:'package_files',ok:(total>0||patchOperationCount>0)&&Number(pkg.fileCount||0)===total,message:`Update bundle contains ${total} nested file(s) and ${patchOperationCount} Base delete operation(s).`});
+      const patchOperationCount=panelDeletePaths.length;
+      checks.push({key:'package_files',ok:(total>0||patchOperationCount>0)&&Number(pkg.fileCount||0)===total,message:`Update bundle contains ${total} nested file(s) and ${patchOperationCount} Base delete operation(s).`});
       checks.push({key:'package_version',ok:String(pkg.version||'')===String(row.version||''),message:String(pkg.version||'')===String(row.version||'')?'Package version matches release version.':'Package version does not match release version.'});
       checks.push({key:'package_source',ok:String(pkg.sourceCommit||'')===String(row.source_sha||''),message:String(pkg.sourceCommit||'')===String(row.source_sha||'')?'Package source commit matches release source.':'Package source commit does not match release source.'});
       return checks;
