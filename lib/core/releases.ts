@@ -5,7 +5,7 @@ import { requireReleaseChannel } from './release-channels';
 import { compareOrbitReleaseVersions, isOrbitReleaseVersion, orbitReleaseVersionFamily } from './versioning';
 import { publishReleaseDatabasePackages, validateReleaseDatabasePackages } from './database-packages';
 
-const ALLOWED_UPDATE_COMPONENTS = new Set(['mcp', 'apex', 'studio']);
+const ALLOWED_UPDATE_COMPONENTS = new Set(['base', 'mcp', 'apex', 'studio']);
 const MAX_ARTIFACT_BYTES = 75 * 1024 * 1024;
 const FORBIDDEN_PATHS = /(^|\/)(\.env(?:$|\.(?!example$))|\.git(?:\/|$)|node_modules(?:\/|$)|\.vercel(?:\/|$))/i;
 const BASE_DATABASE_RUNTIME_ACCESS_CONTRACT={
@@ -31,7 +31,7 @@ const LEGACY_BASE_ENGINE_DEPLOYER_PROTOCOL=1;
 const LOCAL_BASE_REPO='remipetrovich-design/OrbitFS-Base-System';
 const LOCAL_BASE_REF='base-release';
 const LOCAL_ENGINE_REPO='remipetrovich-design/OrbitFS_Engine';
-const LOCAL_ENGINE_REF='main';
+const LOCAL_ENGINE_REF='UPDATE_RELEASE';
 const LOCAL_SOURCE_REPOS=[LOCAL_BASE_REPO,LOCAL_ENGINE_REPO] as const;
 const LOCAL_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Base-System';
 const LEGACY_BASE_ARTIFACT_REPO='remipetrovich-design/OrbitFS-Control-Centre';
