@@ -34,7 +34,7 @@ function componentFor(path: string) {
   return 'shared';
 }
 function githubToken() {
-  return String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN || process.env.GITHUB_RELEASE_TOKEN || '').trim();
+  return String(process.env.ORBITFS_FALLBACK_GITHUB_TOKEN || process.env.GITHUB_RELEASE_TOKEN || '').trim();
 }
 async function github(path: string) {
   const token = githubToken();
