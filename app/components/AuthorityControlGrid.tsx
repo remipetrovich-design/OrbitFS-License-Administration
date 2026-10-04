@@ -33,9 +33,11 @@ function SwitchFace({effective,pending=false}:{effective:boolean;pending?:boolea
   <span className={`authority-hardware-lamp ${effective?'is-green':'is-red'}`} aria-hidden="true"/>
   <span className="authority-hardware-switch-stage" aria-hidden="true">
    <span className="authority-hardware-switch-label is-off-label">OFF</span>
-   <span className={`authority-hardware-toggle ${effective?'is-down':'is-up'}`}>
-    <span className="authority-hardware-toggle-bezel"/>
-    <span className="authority-hardware-toggle-stick"/>
+   <span className={`authority-hardware-rocker ${effective?'is-down':'is-up'}`}>
+    <span className="authority-hardware-rocker-face">
+     <span className="authority-hardware-rocker-half rocker-off"><b>O</b></span>
+     <span className="authority-hardware-rocker-half rocker-on"><b>I</b></span>
+    </span>
    </span>
    <span className="authority-hardware-switch-label is-on-label">ON</span>
   </span>
