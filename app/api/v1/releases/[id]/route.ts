@@ -40,13 +40,13 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     try{
       const release=(await db().query('select * from releases where id=$1 limit 1',[id])).rows[0];
       if(!release)return NextResponse.json({error:'RELEASE_NOT_FOUND',code:'RELEASE_NOT_FOUND'},{status:404});
-      const everPublished=release.status==='published'||Boolean(release.published_at);
-      if(everPublished){
-        return NextResponse.json({error:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',code:'EVER_PUBLISHED_RELEASE_DELETE_FORBIDDEN',status:release.status,message:'Published release history is retained for rollback and audit. Only never-published release attempts can be permanently deleted.'},{status:409});
+      const currentlyPublished=String(release.status||'').toLowerCase()==='published';
+      if(currentlyPublished){
+        return NextResponse.json({error:'PUBLISHED_RELEASE_DELETE_FORBIDDEN',code:'PUBLISHED_RELEASE_DELETE_FORBIDDEN',status:release.status,message:'This release is currently published. Unpublish or withdraw it before deleting.'},{status:409});
       }
       const deleted=(await db().query('delete from releases where id=$1 returning *',[id])).rows[0];
-      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${auth.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:null,permanent:true,never_published:true,reason:body.reason?String(body.reason):null})]);
-      return NextResponse.json({deleted:true,id,previous_status:deleted.status,never_published:true});
+      await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.delete','release',$2,$3)",[`api:${auth.name}`,id,JSON.stringify({product_id:deleted.product_id,version:deleted.version,channel:deleted.channel,release_type:deleted.release_type,status:deleted.status,review_status:deleted.review_status,created_at:deleted.created_at,published_at:deleted.published_at||null,permanent:true,was_published_before:Boolean(deleted.published_at),reason:body.reason?String(body.reason):null})]);
+      return NextResponse.json({deleted:true,id,previous_status:deleted.status,was_published_before:Boolean(deleted.published_at)});
     }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Release delete failed',code:'RELEASE_DELETE_FAILED'},{status:400});}
   }
   if(['withdraw','archive','restore'].includes(action)){
