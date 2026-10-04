@@ -167,7 +167,7 @@ async function scanPackage(row:any,bytes:Buffer){
       const panel=pkg?.payloads?.panel??null;
       const engine=pkg?.payloads?.engine??null;
       const protocol=Number(pkg.minimumEngineDeployerProtocol);
-      const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true;
+      const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&(!engineTargets.length||(Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true));
       const componentVersions=pkg.componentVersions&&typeof pkg.componentVersions==='object'&&!Array.isArray(pkg.componentVersions)?pkg.componentVersions:null;
       const componentVersionsValid=Boolean(componentVersions&&components.every((component:string)=>{
         if(component==='base')return true;
@@ -204,12 +204,12 @@ async function scanPackage(row:any,bytes:Buffer){
       checks.push({key:'package_components_match',ok:componentRecordMatches,message:componentRecordMatches?'Release record components exactly match the packaged Update targets.':'Release record components do not match the packaged Update targets.'});
       checks.push({key:'package_update_schema',ok:databaseOk,message:databaseOk?(migrations.length?`Customer database migration contract contains ${migrations.length} verified immutable migration(s).`:'Update release has a valid empty customer database migration contract.'):'Update database/schema changes require a valid checksummed orbitfs-db-migrations-v1 contract that matches the Engine payload.'});
       checks.push({key:'package_update_sequence_targets',ok:invalidMigrationSequenceTargets.length===0,message:invalidMigrationSequenceTargets.length?`Update migration SQL contains invalid setval() sequence target(s): ${invalidMigrationSequenceTargets.slice(0,5).join(', ')}.`:'Update migration setval() targets do not reference primary/unique constraints.'});
-      checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?'Minimum Base version, deployer protocol and checkpoint contract are valid.':'Update bundle compatibility metadata is invalid.'});
+      checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, deployer protocol and checkpoint contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
 
       const panelOk=baseTarget
         ?Boolean(panel&&typeof panel==='object'&&Array.isArray(panel.files)&&panel.files.length>0)
         :panel===null||panel===undefined;
-      checks.push({key:'package_panel_payload',ok:panelOk,message:baseTarget?(panelOk?'Base/inner-deployer payload is present for the deployed-system Update.':'Base-targeting Update requires a Base/Panel payload.'):(panelOk?'No Base payload is present for this Engine/addon-only Update.':'Update declares no Base target but contains a Base/Panel payload.')});
+      checks.push({key:'package_panel_payload',ok:panelOk,message:baseTarget?(panelOk?'Base/inner-deployer payload is present for the deployed-system Update.':'Base-targeting Update requires a Base/Panel payload.'):(panelOk?'No Base payload is present for this Engine/addon Update.':'Update declares no Base target but contains a Base/Panel payload.')});
 
       const rawEngineComponents=engine?canonicalComponents(engine.components,'update'):[];
       const engineHasBase=rawEngineComponents.includes('base');
