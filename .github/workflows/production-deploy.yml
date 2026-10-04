@@ -204,6 +204,13 @@ jobs:
           if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
           NODE
 
+      - name: Reuse existing production deployment
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
+        run: |
+          echo "Production deployment not required."
+          echo "Commit: $GITHUB_SHA"
+          echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"
+
       - name: Deploy exact validated prebuilt artifact to production
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
         id: deploy
@@ -227,9 +234,3 @@ jobs:
           echo "Production deployment completed for immutable commit $GITHUB_SHA."
           echo "Deployment: $deployment_url"
 
-      - name: Reuse existing production deployment
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
-        run: |
-          echo "Production deployment not required."
-          echo "Commit: $GITHUB_SHA"
-          echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"
