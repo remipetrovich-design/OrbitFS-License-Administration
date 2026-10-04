@@ -211,6 +211,20 @@ jobs:
           if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
           NODE
 
+      - name: Skip no-op deployment
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes != 'true') }}
+        run: |
+          echo "Quick deployment not required because the selected commit has no file changes since the previous production deployment."
+          echo "Commit: $GITHUB_SHA"
+          echo "Changed files: ${{ steps.change_manifest.outputs.changed_file_count }}"
+
+      - name: Reuse existing production deployment
+        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
+        run: |
+          echo "Quick deployment not required."
+          echo "Commit: $GITHUB_SHA"
+          echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"
+
       - name: Deploy quick artifact to production
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         id: deploy
@@ -236,16 +250,4 @@ jobs:
           echo "Commit: $GITHUB_SHA"
           echo "Deployment: $deployment_url"
 
-      - name: Skip no-op deployment
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes != 'true') }}
-        run: |
-          echo "Quick deployment not required because the selected commit has no file changes since the previous production deployment."
-          echo "Commit: $GITHUB_SHA"
-          echo "Changed files: ${{ steps.change_manifest.outputs.changed_file_count }}"
 
-      - name: Reuse existing production deployment
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed == 'true') }}
-        run: |
-          echo "Quick deployment not required."
-          echo "Commit: $GITHUB_SHA"
-          echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"
