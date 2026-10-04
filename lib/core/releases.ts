@@ -162,7 +162,8 @@ async function scanPackage(row:any,bytes:Buffer){
       const recordComponents=canonicalComponents(row.manifest?.components,'update');
       const validTargets=components.length>0&&components.every((x:string)=>ALLOWED_UPDATE_COMPONENTS.has(x));
       const componentRecordMatches=[...components].sort().join(',')===[...recordComponents].sort().join(',');
-      const engineTargets=components;
+      const baseTarget=components.includes('base');
+      const engineTargets=components.filter((component:string)=>component!=='base');
       const panel=pkg?.payloads?.panel??null;
       const engine=pkg?.payloads?.engine??null;
       const protocol=Number(pkg.minimumUpdaterProtocol??pkg.minimumEngineDeployerProtocol);
@@ -205,8 +206,13 @@ async function scanPackage(row:any,bytes:Buffer){
       checks.push({key:'package_update_sequence_targets',ok:invalidMigrationSequenceTargets.length===0,message:invalidMigrationSequenceTargets.length?`Update migration SQL contains invalid setval() sequence target(s): ${invalidMigrationSequenceTargets.slice(0,5).join(', ')}.`:'Update migration setval() targets do not reference primary/unique constraints.'});
       checks.push({key:'package_engine_compatibility',ok:compatibility,message:compatibility?(engineTargets.length?'Minimum Base version, Updater protocol and rollback contract are valid.':'Minimum Base compatibility is valid for this Base-only Update.'):'Update bundle compatibility metadata is invalid.'});
 
-      const panelOk=panel===null||panel===undefined;
-      checks.push({key:'package_panel_payload',ok:panelOk,message:panelOk?'Update release contains no Base payload.':'Base payloads belong to the Base Deployer/Base Updater, not the Update Release System.'});
+      const panelDeletePaths=Array.isArray(panel?.deletePaths)?panel.deletePaths.map((value:any)=>String(value||'').replaceAll('\\\\','/')):[];
+      const panelFiles=Array.isArray(panel?.files)?panel.files:[];
+      const panelPathSafe=(value:string)=>Boolean(value)&&!value.startsWith('/')&&!value.includes('..')&&!/(^|\\/)(?:\\.git|\\.vercel|node_modules)(?:\\/|$)/i.test(value);
+      const panelIdentityOk=!baseTarget
+        ?panel===null||panel===undefined
+        :Boolean(panel&&panel.format==='orbitfs-base-update-patch-v1'&&Number(panel.schemaVersion)===1&&String(panel.version||'')===String(pkg.version||'')&&String(panel.sourceCommit||'')===String(pkg.sourceCommit||'')&&(panelFiles.length>0||panelDeletePaths.length>0)&&panelDeletePaths.every(panelPathSafe));
+      checks.push({key:'package_panel_payload',ok:panelIdentityOk,message:baseTarget?(panelIdentityOk?'Base target contains a valid targeted Base patch payload.':'Base-targeting Update requires a valid orbitfs-base-update-patch-v1 payload.'):(panelIdentityOk?'No Base patch payload is present.':'Update has a Base patch payload without declaring the Base target.')});
 
       const rawEngineComponents=engine?canonicalComponents(engine.components,'update'):[];
       const engineHasBase=rawEngineComponents.includes('base');
@@ -219,10 +225,12 @@ async function scanPackage(row:any,bytes:Buffer){
 
       let total=0;
       if(panel){
-        const inspected=inspectPackageFiles(panel.files,{label:'Panel payload'});
-        appendFileChecks(checks,inspected,'package_panel');
+        const inspected=inspectPackageFiles(panel.files||[],{label:'Base patch payload'});
+        if(inspected.list.length)appendFileChecks(checks,inspected,'package_panel');
+        else checks.push({key:'package_panel_files',ok:panelDeletePaths.length>0,message:panelDeletePaths.length?'Base patch is delete-only and contains validated delete targets.':'Base patch contains no file or delete operations.'});
         total+=inspected.list.length;
-        checks.push({key:'package_panel_file_count',ok:Number(panel.fileCount||0)===inspected.list.length,message:`Panel payload declares ${Number(panel.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
+        checks.push({key:'package_panel_file_count',ok:Number(panel.fileCount||0)===inspected.list.length,message:`Base patch declares ${Number(panel.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
+        checks.push({key:'package_panel_delete_count',ok:Number(panel.deleteCount||0)===panelDeletePaths.length,message:`Base patch declares ${Number(panel.deleteCount||0)} delete(s); scanned ${panelDeletePaths.length}.`});
       }
       if(engine){
         const inspected=inspectPackageFiles(engine.files,{label:'Engine payload',componentMode:Number(engine.schemaVersion||0)>=3?'engine-v3':'none'});
@@ -230,7 +238,7 @@ async function scanPackage(row:any,bytes:Buffer){
         total+=inspected.list.length;
         checks.push({key:'package_engine_file_count',ok:Number(engine.fileCount||0)===inspected.list.length,message:`Engine payload declares ${Number(engine.fileCount||0)} file(s); scanned ${inspected.list.length}.`});
       }
-      checks.push({key:'package_files',ok:total>0&&Number(pkg.fileCount||0)===total,message:`Update bundle contains ${total} nested file(s).`});
+      const patchOperationCount=panelDeletePaths.length;\n      checks.push({key:'package_files',ok:(total>0||patchOperationCount>0)&&Number(pkg.fileCount||0)===total,message:`Update bundle contains ${total} nested file(s) and ${patchOperationCount} Base delete operation(s).`});
       checks.push({key:'package_version',ok:String(pkg.version||'')===String(row.version||''),message:String(pkg.version||'')===String(row.version||'')?'Package version matches release version.':'Package version does not match release version.'});
       checks.push({key:'package_source',ok:String(pkg.sourceCommit||'')===String(row.source_sha||''),message:String(pkg.sourceCommit||'')===String(row.source_sha||'')?'Package source commit matches release source.':'Package source commit does not match release source.'});
       return checks;
