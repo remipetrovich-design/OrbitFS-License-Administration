@@ -208,7 +208,7 @@ async function scanPackage(row:any,bytes:Buffer){
 
       const panelDeletePaths=Array.isArray(panel?.deletePaths)?panel.deletePaths.map((value:any)=>String(value||'').replaceAll('\\','/')):[];
       const panelFiles=Array.isArray(panel?.files)?panel.files:[];
-      const panelPathSafe=(value:string)=>Boolean(value)&&!value.startsWith('/')&&!value.includes('..')&&!/(^|\/)(?:\.git|\.vercel|node_modules)(?:\/|$)/i.test(value);
+      const panelPathSafe=(value:string)=>Boolean(value)&&!value.startsWith('/')&&!value.includes('..')&&!/(^|\/)(?:\.git|\.vercel|node_modules)(?:\/|$)/i.test(value)&&!/(^|\/)\.env(?:$|\.)/i.test(value);
       const panelIdentityOk=!baseTarget
         ?panel===null||panel===undefined
         :Boolean(panel&&panel.format==='orbitfs-base-update-patch-v1'&&Number(panel.schemaVersion)===1&&String(panel.version||'')===String(pkg.version||'')&&String(panel.sourceCommit||'')===String(pkg.sourceCommit||'')&&(panelFiles.length>0||panelDeletePaths.length>0)&&panelDeletePaths.every(panelPathSafe));
