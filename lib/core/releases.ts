@@ -170,6 +170,7 @@ async function scanPackage(row:any,bytes:Buffer){
       const compatibility=validReleaseVersion(pkg.minimumBaseVersion)&&Number.isInteger(protocol)&&protocol>=1&&pkg.checkpointRequired===true;
       const componentVersions=pkg.componentVersions&&typeof pkg.componentVersions==='object'&&!Array.isArray(pkg.componentVersions)?pkg.componentVersions:null;
       const componentVersionsValid=Boolean(componentVersions&&components.every((component:string)=>{
+        if(component==='base')return true;
         const value=String(componentVersions[component]||'').trim();
         return validReleaseVersion(value);
       })&&Object.keys(componentVersions).every((key)=>components.includes(String(key))));
