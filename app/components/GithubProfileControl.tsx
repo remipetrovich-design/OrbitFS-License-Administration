@@ -1,5 +1,6 @@
 'use client';
 import {useState} from 'react';
+import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
 
@@ -9,6 +10,29 @@ type Props={
  canManage:boolean;
  action:(formData:FormData)=>Promise<void>;
 };
+
+function SwitchSubmit({enabled,targetLabel}:{enabled:boolean;targetLabel:string}){
+ const {pending}=useFormStatus();
+ return <>
+  <button type="submit" className="button danger" disabled={!enabled||pending}>{pending?'Processing handoff…':`Switch to ${targetLabel}`}</button>
+  {pending&&<div className="github-mode-processing" role="status" aria-live="polite" aria-label="Source handoff in progress">
+   <div className="github-mode-processing-panel">
+    <div className="github-mode-processing-spinner" aria-hidden="true"/>
+    <span className="github-mode-processing-kicker">SOURCE HANDOFF IN PROGRESS</span>
+    <h3>Switching to {targetLabel}</h3>
+    <p>Master Authority remains OFF while OrbitFS validates both GitHub families and completes the source-authority handoff.</p>
+    <div className="github-mode-processing-steps">
+     <span>Verify current and target repository credentials</span>
+     <span>Confirm Base and UPDATE_RELEASE refs</span>
+     <span>Commit shared source authority state</span>
+     <span>Dispatch the target Control Centre activation</span>
+     <span>Automatically revert the source mode if activation dispatch fails</span>
+    </div>
+    <small>Do not close this page until the handoff finishes.</small>
+   </div>
+  </div>}
+ </>;
+}
 
 const mappings={
  primary:[
@@ -116,7 +140,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
      </label>
      <div className="github-mode-modal-actions">
       <button type="button" className="button secondary" onClick={()=>setConfirming(false)}>Cancel</button>
-      <button type="submit" className="button danger" disabled={!vercelReady||confirmation!==confirmationPhrase}>Switch to {targetLabel}</button>
+      <SwitchSubmit enabled={vercelReady&&confirmation===confirmationPhrase} targetLabel={targetLabel}/>
      </div>
     </form>
    </div>
