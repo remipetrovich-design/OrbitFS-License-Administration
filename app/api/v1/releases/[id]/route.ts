@@ -1,7 +1,7 @@
 import {NextResponse} from 'next/server';
 import {integrationAuthorized} from '../../../../../lib/auth';
 import {db} from '../../../../../lib/db';
-import {archiveRelease,publishRelease,promoteRelease,createPresentationRevision,updateReleasePresentation,withdrawRelease,setReleaseReview,markReleaseRolledBack,withAuthoritativeReleaseRuntimeAccess} from '../../../../../lib/core/releases';
+import {archiveRelease,publishRelease,promoteRelease,createPresentationRevision,republishRelease,updateReleasePresentation,withdrawRelease,setReleaseReview,markReleaseRolledBack,withAuthoritativeReleaseRuntimeAccess} from '../../../../../lib/core/releases';
 
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
   const auth=await integrationAuthorized(request,'releases.read');
@@ -63,6 +63,11 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     // Publication/promotion are customer-facing release lifecycle actions for both
     // Base and Update releases. Technical validation/approval remains protected
     // above by releases.control and is enforced again by publishRelease/promoteRelease.
+    if(action==='republish'){
+      const revision=await republishRelease(id,undefined,`api:${auth.name}`);
+      if(!revision)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
+      return NextResponse.json({release:await publishRelease(String(revision.id),undefined,`api:${auth.name}`),republished_from:id});
+    }
     if(action==='publish')return NextResponse.json({release:await publishRelease(id,undefined,`api:${auth.name}`)});
     if(action==='withdraw')return NextResponse.json({release:await withdrawRelease(id,undefined,`api:${auth.name}`)});
     if(action==='disable'||action==='pause'){const row=(await db().query("select * from releases where id=$1 limit 1",[id])).rows[0];if(!row)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});const release=row.status==='published'?await withdrawRelease(id,undefined,`api:${auth.name}`):(await db().query("update releases set status='withdrawn' where id=$1 returning *",[id])).rows[0];if(row.status!=='published')await db().query("insert into audit_events(actor,action,resource_type,resource_id,details) values($1,'release.withdraw','release',$2,$3)",["api:"+auth.name,id,JSON.stringify({previous_status:row.status,reason:'pause'})]);return NextResponse.json({release});}
