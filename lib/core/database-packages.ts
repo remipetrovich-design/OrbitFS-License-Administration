@@ -28,9 +28,13 @@ const DATABASE_SOURCE_REPOS:Record<DatabaseSourceProfile,Record<CustomerDatabase
     studio:'remipetrovich-design/OrbitFS_Engine'
   }
 };
-const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>=Object.fromEntries(
-  CUSTOMER_DATABASE_COMPONENTS.map((name)=>[name,[DATABASE_SOURCE_REPOS.primary[name],DATABASE_SOURCE_REPOS.fallback[name]]])
-) as Record<CustomerDatabaseComponent,readonly string[]>;
+const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
+  base:[DATABASE_SOURCE_REPOS.primary.base,DATABASE_SOURCE_REPOS.fallback.base],
+  'engine-shared':[DATABASE_SOURCE_REPOS.primary['engine-shared'],DATABASE_SOURCE_REPOS.fallback['engine-shared']],
+  mcp:[DATABASE_SOURCE_REPOS.primary.mcp,DATABASE_SOURCE_REPOS.fallback.mcp],
+  apex:[DATABASE_SOURCE_REPOS.primary.apex,DATABASE_SOURCE_REPOS.fallback.apex],
+  studio:[DATABASE_SOURCE_REPOS.primary.studio,DATABASE_SOURCE_REPOS.fallback.studio]
+};
 const ALL_DATABASE_SOURCE_REPOS=[...new Set(Object.values(SOURCE_REPOS).flat())];
 
 function databaseSourceProfileForRepo(value:unknown):DatabaseSourceProfile|null{
