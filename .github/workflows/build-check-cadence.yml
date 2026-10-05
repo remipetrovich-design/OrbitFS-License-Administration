@@ -1,0 +1,41 @@
+name: License Build Check Cadence
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: license-build-cadence-main
+  cancel-in-progress: false
+
+jobs:
+  cadence:
+    name: Check build cadence
+    runs-on: ubuntu-latest
+    outputs:
+      due: ${{ steps.cadence.outputs.due }}
+    steps:
+      - name: Run build check every fifth main push
+        id: cadence
+        shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if (( RUN_NUMBER % 5 == 0 )); then
+            echo "due=true" >> "$GITHUB_OUTPUT"
+            echo "License build check is due on cadence run $RUN_NUMBER."
+          else
+            echo "due=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping License build check on cadence run $RUN_NUMBER."
+          fi
+
+  build-check:
+    name: Scheduled License build check
+    needs: cadence
+    if: needs.cadence.outputs.due == 'true'
+    uses: ./.github/workflows/build-check.yml
+    secrets: inherit
