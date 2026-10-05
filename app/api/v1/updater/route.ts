@@ -7,6 +7,13 @@ import {validateLicense} from '../../../../lib/core/licenses';
 export const runtime='nodejs';
 
 function githubAssetUrl(value:string){try{const u=new URL(value);if(u.hostname!=='api.github.com')return null;const m=u.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/releases\/assets\/(\d+)$/);return m?{owner:m[1],repo:m[2],assetId:m[3]}:null;}catch{return null;}}
+function githubTokensForRepo(repo:string){
+  const fallback=repo.startsWith('remipetrovich-design/');
+  const names=fallback
+    ?['ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_TOKEN']
+    :['ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_TOKEN'];
+  return [...new Set(names.map(name=>String(process.env[name]||'').trim()).filter(Boolean).concat(''))];
+}
 function requestIp(request:Request){return request.headers.get('x-real-ip')?.trim()||request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||null;}
 function telemetry(body:any){const source=body?.telemetry&&typeof body.telemetry==='object'?body.telemetry:{};const allowed=['hostname','platform','architecture','client','clientVersion','provider','region','components'];return Object.fromEntries(allowed.filter(k=>source[k]!==undefined&&source[k]!==null&&source[k]!=='').map(k=>[k,source[k]]));}
 
@@ -79,12 +86,7 @@ export async function GET(request:Request){
     const artifactTag=String(release.manifest?.artifactTag||'').trim();
     const artifactName=String(release.artifact_name||'').trim();
     if(artifactRepo&&artifactTag&&artifactName){
-      const tokens=[...new Set([
-        String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim(),
-        String(process.env.GITHUB_RELEASE_TOKEN||'').trim(),
-        String(process.env.GITHUB_TOKEN||'').trim(),
-        ''
-      ])];
+      const tokens=githubTokensForRepo(artifactRepo);
       let releaseResponse:Response|null=null;
       for(const token of tokens){
         const headers:Record<string,string>={accept:'application/vnd.github+json','x-github-api-version':'2022-11-28','user-agent':'OrbitFS-License-Master'};
@@ -104,12 +106,7 @@ export async function GET(request:Request){
     const github=githubAssetUrl(artifactUrl);
     let response:Response;
     if(github){
-      const tokens=[...new Set([
-        String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim(),
-        String(process.env.GITHUB_RELEASE_TOKEN||'').trim(),
-        String(process.env.GITHUB_TOKEN||'').trim(),
-        ''
-      ])];
+      const tokens=githubTokensForRepo(artifactRepo);
       const githubFetch=async(url:string,accept:string)=>{
         let last:Response|null=null;
         for(const token of tokens){
