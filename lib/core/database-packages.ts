@@ -11,19 +11,43 @@ const FORBIDDEN_INTERNAL_SQL=/\b(?:billing_[a-z0-9_]*|license_manager_[a-z0-9_]*
 const DESTRUCTIVE_SQL=/\b(?:drop\s+table|drop\s+schema|truncate\s+(?:table\s+)?|alter\s+table[\s\S]{0,300}?drop\s+column)\b/i;
 const TRANSACTION_SQL=/\b(?:begin|commit|rollback)\s*;/i;
 
-const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
-  base:['remipetrovich-design/OrbitFS-Base-System'],
-  'engine-shared':['remipetrovich-design/OrbitFS_Engine'],
-  mcp:['remipetrovich-design/OrbitFS_Engine'],
-  apex:['remipetrovich-design/OrbitFS_Engine'],
-  studio:['remipetrovich-design/OrbitFS_Engine']
+type DatabaseSourceProfile='primary'|'fallback';
+const DATABASE_SOURCE_REPOS:Record<DatabaseSourceProfile,Record<CustomerDatabaseComponent,string>>={
+  primary:{
+    base:'lucaskerim123/V1-vercel-base',
+    'engine-shared':'lucaskerim123/V1-vercel-engine',
+    mcp:'lucaskerim123/V1-vercel-engine',
+    apex:'lucaskerim123/V1-vercel-engine',
+    studio:'lucaskerim123/V1-vercel-engine'
+  },
+  fallback:{
+    base:'remipetrovich-design/OrbitFS-Base-System',
+    'engine-shared':'remipetrovich-design/OrbitFS_Engine',
+    mcp:'remipetrovich-design/OrbitFS_Engine',
+    apex:'remipetrovich-design/OrbitFS_Engine',
+    studio:'remipetrovich-design/OrbitFS_Engine'
+  }
 };
-const LOCAL_DATABASE_SOURCE_REPOS=[...new Set(Object.values(SOURCE_REPOS).flat())];
+const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>=Object.fromEntries(
+  CUSTOMER_DATABASE_COMPONENTS.map((name)=>[name,[DATABASE_SOURCE_REPOS.primary[name],DATABASE_SOURCE_REPOS.fallback[name]]])
+) as Record<CustomerDatabaseComponent,readonly string[]>;
+const ALL_DATABASE_SOURCE_REPOS=[...new Set(Object.values(SOURCE_REPOS).flat())];
 
-function localSourceRepoForComponent(value:CustomerDatabaseComponent){
-  const repo=SOURCE_REPOS[value][0];
-  if(!repo)throw new Error('DATABASE_PACKAGE_SOURCE_REPO_UNCONFIGURED');
-  return repo;
+function databaseSourceProfileForRepo(value:unknown):DatabaseSourceProfile|null{
+  const repo=String(value||'').trim();
+  if(repo.startsWith('lucaskerim123/'))return 'primary';
+  if(repo.startsWith('remipetrovich-design/'))return 'fallback';
+  return null;
+}
+function knownSourceRepoForComponent(value:CustomerDatabaseComponent,repo:unknown){
+  return SOURCE_REPOS[value].includes(String(repo||'').trim());
+}
+async function activeDatabaseSourceProfile():Promise<DatabaseSourceProfile>{
+  const row=(await db().query('select github_profile from system_settings where id=true')).rows[0];
+  return String(row?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+}
+async function activeSourceRepoForComponent(value:CustomerDatabaseComponent){
+  return DATABASE_SOURCE_REPOS[await activeDatabaseSourceProfile()][value];
 }
 
 const MIGRATION_PATHS:Record<CustomerDatabaseComponent,RegExp>={
@@ -159,6 +183,8 @@ export function validateDatabasePackage(input:any){
 
 export async function createDatabasePackageCandidate(input:any,actor:string){
   const validated=validateDatabasePackage(input);
+  const activeRepo=await activeSourceRepoForComponent(validated.component);
+  if(validated.sourceRepo!==activeRepo)throw new Error('DATABASE_PACKAGE_SOURCE_PROFILE_INACTIVE');
 
   const existing=(await db().query(
     'select * from database_packages where component=$1 and database_schema_version=$2 and package_sha256=$3 and source_repo=$4 and source_commit=$5 limit 1',
@@ -192,7 +218,7 @@ export async function publishDatabasePackage(id:string,actor:string){
     const candidate=(await client.query('select * from database_packages where id=$1 for update',[id])).rows[0];
 
     if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
-    if(String(candidate.source_repo||'')!==localSourceRepoForComponent(component(candidate.component)))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
+    if(!knownSourceRepoForComponent(component(candidate.component),candidate.source_repo))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
     if(candidate.status==='current'){
       await client.query('commit');
       return candidate;
@@ -226,7 +252,7 @@ export async function publishDatabasePackage(id:string,actor:string){
 }
 
 export async function listDatabasePackages(componentFilter?:string){
-  const values:any[]=[[...LOCAL_DATABASE_SOURCE_REPOS]];
+  const values:any[]=[[...ALL_DATABASE_SOURCE_REPOS]];
   let componentClause='';
   if(componentFilter){
     values.push(component(componentFilter));
@@ -244,9 +270,10 @@ export async function listDatabasePackages(componentFilter?:string){
 
 export async function getCurrentDatabasePackage(componentValue:string){
   const selected=component(componentValue);
+  const sourceRepo=await activeSourceRepoForComponent(selected);
   return (await db().query(
     "select * from database_packages where component=$1 and source_repo=$2 and database_target='customer' and status='current' limit 1",
-    [selected,localSourceRepoForComponent(selected)]
+    [selected,sourceRepo]
   )).rows[0]||null;
 }
 
@@ -323,7 +350,7 @@ export async function publishReleaseDatabasePackages(client:any,row:any,actorUse
   for(const ref of refs){
     const candidate=(await client.query('select * from database_packages where id=$1 for update',[ref.id])).rows[0];
     if(!candidate)throw new Error('DATABASE_PACKAGE_NOT_FOUND');
-    if(String(candidate.source_repo||'')!==localSourceRepoForComponent(component(candidate.component)))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
+    if(!knownSourceRepoForComponent(component(candidate.component),candidate.source_repo))throw new Error('DATABASE_PACKAGE_SYSTEM_MISMATCH');
     if(!['candidate','current'].includes(String(candidate.status||'')))throw new Error('DATABASE_PACKAGE_NOT_PUBLISHABLE');
     const newer=(await client.query(
       "select 1 from database_packages where component=$1 and source_repo=$2 and status='current' and database_schema_version>$3 and id<>$4 limit 1",
