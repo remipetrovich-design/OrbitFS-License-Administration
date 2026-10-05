@@ -291,10 +291,10 @@ async function verifyGithubProfileTarget(profile:GithubProfileName){
   const target=GITHUB_PROFILE_TARGETS[profile];
   const credentials=githubCredentialCandidates(profile);
   const checked:Array<{repo:string;ref:string;sha:string;credential:string}>=[];
+  if(!credentials.length)throw new Error('Cannot activate '+profile.toUpperCase()+': no configured GitHub credential is available for the target repository family');
   for(const item of target.repos){
     let verified:{sha:string;credential:string}|null=null;
-    const attempts=[...credentials,{name:'public',value:''}];
-    for(const credential of attempts){
+    for(const credential of credentials){
       const headers:Record<string,string>={accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
       if(credential.value)headers.authorization='Bearer '+credential.value;
       const repoResponse=await fetch('https://api.github.com/repos/'+item.repo,{headers,cache:'no-store'});
@@ -309,6 +309,49 @@ async function verifyGithubProfileTarget(profile:GithubProfileName){
     checked.push({repo:item.repo,ref:item.ref,sha:verified.sha,credential:verified.credential});
   }
   return checked;
+}
+
+const GITHUB_PROFILE_ACTIVATION:Record<GithubProfileName,{repo:string;workflow:string}>={
+  primary:{repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml'},
+  fallback:{repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml'},
+};
+
+async function prepareGithubProfileActivation(profile:GithubProfileName){
+  const target=GITHUB_PROFILE_ACTIVATION[profile];
+  const credentials=githubCredentialCandidates(profile);
+  for(const credential of credentials){
+    const headers:Record<string,string>={
+      accept:'application/vnd.github+json',
+      authorization:'Bearer '+credential.value,
+      'x-github-api-version':'2022-11-28',
+    };
+    const response=await fetch('https://api.github.com/repos/'+target.repo+'/actions/workflows/'+encodeURIComponent(target.workflow),{headers,cache:'no-store'});
+    if(response.ok)return {...target,credential:credential.name,token:credential.value};
+  }
+  throw new Error('Cannot activate '+profile.toUpperCase()+': no configured target GitHub credential can access '+target.repo+' workflow '+target.workflow);
+}
+
+async function dispatchGithubProfileActivation(activation:{repo:string;workflow:string;credential:string;token:string}){
+  let lastError='unknown GitHub error';
+  for(let attempt=1;attempt<=3;attempt++){
+    const response=await fetch('https://api.github.com/repos/'+activation.repo+'/actions/workflows/'+encodeURIComponent(activation.workflow)+'/dispatches',{
+      method:'POST',
+      headers:{
+        accept:'application/vnd.github+json',
+        authorization:'Bearer '+activation.token,
+        'content-type':'application/json',
+        'x-github-api-version':'2022-11-28',
+      },
+      body:JSON.stringify({ref:'main'}),
+      cache:'no-store',
+    });
+    if(response.status===204)return;
+    const body=await response.text().catch(()=>'');
+    lastError='GitHub HTTP '+response.status+(body?' · '+body.slice(0,300):'');
+    if(attempt<3&&[429,500,502,503,504].includes(response.status))await new Promise(resolve=>setTimeout(resolve,attempt*500));
+    else break;
+  }
+  throw new Error('Target Control Centre activation dispatch failed: '+lastError);
 }
 
 export async function setGithubProfile(
@@ -327,6 +370,7 @@ export async function setGithubProfile(
   if(!vercelConfirmed)throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
 
   const checked=await verifyGithubProfileTarget(next);
+  const activation=await prepareGithubProfileActivation(next);
   const pool=db();
   const client=await pool.connect();
   try{
@@ -345,10 +389,41 @@ export async function setGithubProfile(
         master_authority_offline:true,
         vercel_and_latest_source_confirmed:true,
         github_targets:checked,
+        control_centre_activation:{repository:activation.repo,workflow:activation.workflow,credential:activation.credential},
       })],
     );
     await client.query('commit');
-    return updated;
+    try{
+      await dispatchGithubProfileActivation(activation);
+      await pool.query(
+        `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+         values($1,$2,'github_profile.activation_dispatched','system_settings','github_profile',$3)`,
+        [actorUserId,actor,JSON.stringify({profile:next,repository:activation.repo,workflow:activation.workflow,credential:activation.credential})],
+      ).catch(()=>{});
+      return updated;
+    }catch(error){
+      const recovery=await pool.connect();
+      try{
+        await recovery.query('begin');
+        const current=(await recovery.query('select system_enabled,github_profile from system_settings where id=true for update')).rows[0];
+        const active=String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+        if(active===next&&!Boolean(current?.system_enabled)){
+          await recovery.query('update system_settings set github_profile=$1,updated_at=now() where id=true',[actual]);
+          await recovery.query(
+            `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+             values($1,$2,'github_profile.activation_failed_reverted','system_settings','github_profile',$3)`,
+            [actorUserId,actor,JSON.stringify({attempted:next,reverted_to:actual,repository:activation.repo,workflow:activation.workflow,error:error instanceof Error?error.message:String(error)})],
+          );
+        }
+        await recovery.query('commit');
+      }catch(recoveryError){
+        await recovery.query('rollback').catch(()=>{});
+        throw new Error('Source mode activation failed and automatic rollback also failed: '+(recoveryError instanceof Error?recoveryError.message:String(recoveryError)));
+      }finally{
+        recovery.release();
+      }
+      throw error;
+    }
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;
