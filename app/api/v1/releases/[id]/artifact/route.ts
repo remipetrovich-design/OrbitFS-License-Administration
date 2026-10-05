@@ -13,6 +13,14 @@ function githubAssetUrl(value:string){
   }catch{return null;}
 }
 
+function githubTokensForRepo(repo:string){
+  const fallback=repo.startsWith('remipetrovich-design/');
+  const names=fallback
+    ?['ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_TOKEN']
+    :['ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_TOKEN'];
+  return [...new Set(names.map(name=>String(process.env[name]||'').trim()).filter(Boolean).concat(''))];
+}
+
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){
   const auth=await integrationAuthorized(request,'releases.read');
   if(!auth)return NextResponse.json({error:'UNAUTHORIZED',code:'UNAUTHORIZED'},{status:401});
@@ -20,12 +28,8 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
   const row=(await db().query("select artifact_url,artifact_name,artifact_repo,source_repo,checksum,manifest from releases where id=$1 limit 1",[id])).rows[0];
   if(!row)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
 
-  const tokens=[...new Set([
-    String(process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim(),
-    String(process.env.GITHUB_RELEASE_TOKEN||'').trim(),
-    String(process.env.GITHUB_TOKEN||'').trim(),
-    ''
-  ])];
+  const repo=String(row.artifact_repo||row.source_repo||'').trim();
+  const tokens=githubTokensForRepo(repo);
   const githubFetch=async(url:string,accept:string)=>{
     let last:Response|null=null;
     for(const token of tokens){
@@ -39,7 +43,6 @@ export async function GET(request:Request,{params}:{params:Promise<{id:string}>}
     return last||new Response(null,{status:404});
   };
   let assetUrl=String(row.artifact_url||'').trim();
-  const repo=String(row.artifact_repo||row.source_repo||'').trim();
   const tag=String(row.manifest?.artifactTag||'').trim();
   const name=String(row.artifact_name||'').trim();
   if(repo&&tag&&name){
