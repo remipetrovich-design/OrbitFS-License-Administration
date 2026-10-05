@@ -64,9 +64,9 @@ export async function POST(request:Request,{params}:{params:Promise<{id:string}>
     // Base and Update releases. Technical validation/approval remains protected
     // above by releases.control and is enforced again by publishRelease/promoteRelease.
     if(action==='republish'){
-      const revision=await republishRelease(id,undefined,`api:${auth.name}`);
-      if(!revision)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
-      return NextResponse.json({release:await publishRelease(String(revision.id),undefined,`api:${auth.name}`),republished_from:id});
+      const release=await republishRelease(id,undefined,`api:${auth.name}`);
+      if(!release)return NextResponse.json({error:'RELEASE_NOT_FOUND'},{status:404});
+      return NextResponse.json({release,republished_from:id,same_release_id:true});
     }
     if(action==='publish')return NextResponse.json({release:await publishRelease(id,undefined,`api:${auth.name}`)});
     if(action==='withdraw')return NextResponse.json({release:await withdrawRelease(id,undefined,`api:${auth.name}`)});
