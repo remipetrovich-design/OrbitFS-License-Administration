@@ -578,7 +578,9 @@ async function checkWorkflow(row: any) {
     if (!jobsResponse.ok) return { key: 'ci', ok: false, message: `GitHub Actions jobs could not be verified (HTTP ${jobsResponse.status}).` };
     const jobs: any = await jobsResponse.json();
     const candidates = Array.isArray(jobs.jobs) ? jobs.jobs.filter((job:any) => !/technical validation|license master technical validation/i.test(String(job.name || ''))) : [];
-    const buildJob = candidates.find((job:any) => /build|publish|candidate/i.test(String(job.name || ''))) || candidates[0];
+    const successfulBuildJob = candidates.find((job:any) => /build|publish|candidate/i.test(String(job.name || '')) && job.status === 'completed' && job.conclusion === 'success');
+    const successfulJob = candidates.find((job:any) => job.status === 'completed' && job.conclusion === 'success');
+    const buildJob = successfulBuildJob || successfulJob || candidates.find((job:any) => /build|publish|candidate/i.test(String(job.name || ''))) || candidates[0];
     const ok = Boolean(buildJob && buildJob.status === 'completed' && buildJob.conclusion === 'success');
     return { key: 'ci', ok, message: ok ? `GitHub Actions build job completed successfully (${buildJob.name}).` : buildJob ? `GitHub Actions build job is ${buildJob.status || 'unknown'} / ${buildJob.conclusion || 'unknown'}.` : `GitHub Actions run ${run.status || 'unknown'} / ${run.conclusion || 'unknown'} has no successful build job.` };
   } catch (error) {
