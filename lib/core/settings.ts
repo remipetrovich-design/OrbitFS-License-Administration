@@ -369,6 +369,7 @@ export async function setGithubProfile(
   if(String(confirmation||'')!==phrase)throw new Error('Source-mode confirmation did not match '+phrase);
   if(!vercelConfirmed)throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
 
+  const currentChecked=await verifyGithubProfileTarget(expected);
   const checked=await verifyGithubProfileTarget(next);
   const activation=await prepareGithubProfileActivation(next);
   const pool=db();
@@ -388,7 +389,9 @@ export async function setGithubProfile(
         to:next,
         master_authority_offline:true,
         vercel_and_latest_source_confirmed:true,
+        current_github_targets:currentChecked,
         github_targets:checked,
+        shared_history_credentials_verified:true,
         control_centre_activation:{repository:activation.repo,workflow:activation.workflow,credential:activation.credential},
       })],
     );
