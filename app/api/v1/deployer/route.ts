@@ -17,7 +17,7 @@ export async function GET(request:Request){
   const licenseFilter=licenseId?' and a.license_id=$2':'';
   if(licenseId)params.push(licenseId);
   const activation=(await db().query(
-    `select a.id,a.license_id,a.installation_id,a.status,a.product_version,a.first_seen_at,a.last_seen_at,a.last_provider,a.last_region,a.last_deployment_id,a.last_deployment_url,a.last_deployment_status,a.last_operation,a.deployment_count,a.current_components,l.status license_status,l.expires_at license_expires_at,p.slug product
+    `select a.id,a.license_id,a.installation_id,a.status,a.product_version,a.first_seen_at,a.last_seen_at,a.last_ip,a.last_user_agent,a.last_hostname,a.last_platform,a.last_architecture,a.last_client,a.last_client_version,a.last_provider,a.last_region,a.last_deployment_id,a.last_deployment_url,a.last_deployment_status,a.last_operation,a.deployment_count,a.current_components,a.metadata->'panel_domain' panel_domain,coalesce((a.metadata->'deployment_lock'->>'locked')::boolean,false) deployment_locked,nullif(a.metadata->'deployment_lock'->>'reason','') deployment_lock_reason,nullif(a.metadata->'deployment_lock'->>'changed_at','') deployment_lock_changed_at,nullif(a.metadata->'deployment_lock'->>'changed_by','') deployment_lock_changed_by,l.status license_status,l.expires_at license_expires_at,p.slug product
      from activations a
      join licenses l on l.id=a.license_id
      join products p on p.id=l.product_id
@@ -116,7 +116,7 @@ export async function POST(request:Request){
   let activation:any=null;
   let currentBase:any=null;
   if(installationId){
-    activation=(await db().query('select id,status,product_version,last_deployment_id,last_deployment_url from activations where license_id=$1 and installation_id=$2 limit 1',[licenseId,installationId])).rows[0];
+    activation=(await db().query("select id,status,product_version,last_deployment_id,last_deployment_url,coalesce((metadata->'deployment_lock'->>'locked')::boolean,false) deployment_locked,nullif(metadata->'deployment_lock'->>'reason','') deployment_lock_reason from activations where license_id=$1 and installation_id=$2 limit 1",[licenseId,installationId])).rows[0];
     const customerReference=String(license.customer_external_id||'').trim();
     currentBase=(await db().query(
       "select license_id,release_id,product_version,project_id,project_name,deployment_id,deployment_url,customer_identity,created_at from deployment_events where installation_id=$1 and phase='completed' and action in ('deploy','base_update','redeploy','rollback') and coalesce(details->>'rollbackScope','base')='base' and (license_id=$2 or ($3<>'' and lower(coalesce(customer_identity->>'customerNumber',''))=lower($3))) order by created_at desc limit 1",
@@ -125,6 +125,16 @@ export async function POST(request:Request){
     // Runtime licence rotation must not erase an installation's deployment history.
     // A historical event from another licence is accepted only when its recorded
     // Billing customer number matches the current authoritative licence customer.
+  }
+
+  if(phase==='authorize'&&activation?.deployment_locked===true){
+    return NextResponse.json({
+      ok:false,
+      code:'INSTALLATION_DEPLOYMENT_LOCKED',
+      error:activation.deployment_lock_reason||'Deployment is locked for this installation by License Manager.',
+      authority:'orbitfs-license-master-v2',
+      installation:{installation_id:installationId,license_id:licenseId,deployment_locked:true,deployment_lock_reason:activation.deployment_lock_reason||null},
+    },{status:423});
   }
 
   const publishedApproved=release.status==='published'&&release.review_status==='approved'&&!release.archived_at;

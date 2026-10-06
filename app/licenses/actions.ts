@@ -35,7 +35,7 @@ export async function rotateLicenseAction(_prev:{ok:boolean,key:string,error:str
   if(!id)return {ok:false,key:'',error:'License id is required'};
   try{
     if(action==='rotate'){const replacement=await rotateLicense(id,user.id,user.email);return {ok:true,key:replacement.key,error:''};}
-    if(action==='suspend'){await setLicenseStatus(id,'suspended',user.id,user.email);return {ok:true,key:'',error:''};}
+    if(action==='restrict'||action==='suspend'){await setLicenseStatus(id,'suspended',user.id,user.email,{enforcementScope:'license'});return {ok:true,key:'',error:''};}
     if(action==='revoke'||action==='terminate'){await terminateLicense(id,user.id,user.email);return {ok:true,key:'',error:''};}
     if(action==='activate'){
       const current=(await db().query('select status from licenses where id=$1',[id])).rows[0];
@@ -55,7 +55,7 @@ export async function licenseControlAction(formData:FormData){
   if(!roles.includes(user.role)) return;
   const id=String(formData.get('id')||'');const action=String(formData.get('action')||'');const installationId=String(formData.get('installation_id')||'');
   if(!id)return;
-  if(action==='suspend'){await setLicenseStatus(id,'suspended',user.id,user.email);return;}
+  if(action==='restrict'||action==='suspend'){await setLicenseStatus(id,'suspended',user.id,user.email,{enforcementScope:'license'});return;}
   if(action==='revoke'||action==='terminate'){await terminateLicense(id,user.id,user.email);return;}
   if(action==='activate'){
     const current=(await db().query('select status from licenses where id=$1',[id])).rows[0];

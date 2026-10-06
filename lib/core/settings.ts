@@ -168,9 +168,9 @@ export async function acknowledgePulse(input:{
   let pulse:any;
   try{
     if(input.pulseId){
-      pulse=(await db().query('select * from license_pulses where id=$1 limit 1',[String(input.pulseId)])).rows[0];
+      pulse=(await db().query('select id,revision,action,scope,license_id,installation_id,product,component,reason,requires_ack,expires_at from license_pulses where id=$1 limit 1',[String(input.pulseId)])).rows[0];
     }else if(Number.isFinite(Number(input.revision))){
-      pulse=(await db().query('select * from license_pulses where revision=$1 limit 1',[Math.floor(Number(input.revision))])).rows[0];
+      pulse=(await db().query('select id,revision,action,scope,license_id,installation_id,product,component,reason,requires_ack,expires_at from license_pulses where revision=$1 limit 1',[Math.floor(Number(input.revision))])).rows[0];
     }
   }catch(error:any){
     if(error?.code==='42P01')return {ok:true,skipped:true,reason:'PULSE_SCHEMA_NOT_AVAILABLE'};
@@ -244,9 +244,13 @@ export async function toggleSetting(field:SettingField,actorUserId:string,actor:
   return setSetting(field,!Boolean(current?.[field]),actorUserId,actor);
 }
 
+let githubProfileCache:{value:GithubProfileName;expires:number}|null=null;
 export async function getGithubProfile():Promise<GithubProfileName>{
-  const current=await getSettings();
-  return String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+  if(githubProfileCache&&githubProfileCache.expires>Date.now())return githubProfileCache.value;
+  const row=(await db().query('select github_profile from system_settings where id=true')).rows[0];
+  const profile:GithubProfileName=String(row?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+  githubProfileCache={value:profile,expires:Date.now()+20*60*1000};
+  return profile;
 }
 
 const GITHUB_PROFILE_TARGETS:Record<GithubProfileName,{tokenEnv:string;repos:Array<{repo:string;ref:string}>}>={
@@ -396,6 +400,7 @@ export async function setGithubProfile(
       })],
     );
     await client.query('commit');
+    githubProfileCache={value:next,expires:Date.now()+20*60*1000};
     try{
       await dispatchGithubProfileActivation(activation);
       await pool.query(
@@ -412,6 +417,7 @@ export async function setGithubProfile(
         const active=String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
         if(active===next&&!Boolean(current?.system_enabled)){
           await recovery.query('update system_settings set github_profile=$1,updated_at=now() where id=true',[actual]);
+          githubProfileCache={value:actual,expires:Date.now()+20*60*1000};
           await recovery.query(
             `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
              values($1,$2,'github_profile.activation_failed_reverted','system_settings','github_profile',$3)`,

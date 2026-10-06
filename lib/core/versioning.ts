@@ -7,11 +7,12 @@ export type OrbitReleaseVersion = {
   rank: number;
 };
 
-const VERSION_PATTERN=/^([vVbBdD])?\.?(\d+(?:\.\d+){0,7})(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
+const CURRENT_VERSION_PATTERN=/^[1-9][0-9]*(?:\.(?:0|[1-9][0-9]*)){1,3}$/;
+const LEGACY_VERSION_PATTERN=/^([vVbBdD])?\.?(\d+(?:\.\d+){0,7})(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 
 export function parseOrbitReleaseVersion(value: unknown): OrbitReleaseVersion | null {
   const raw=String(value??'').trim();
-  const match=raw.match(VERSION_PATTERN);
+  const match=raw.match(LEGACY_VERSION_PATTERN);
   if(!match)return null;
   const prefix=(match[1]?.toLowerCase()||null) as OrbitReleaseVersion['prefix'];
   const parts=match[2].split('.').map(Number);
@@ -21,7 +22,7 @@ export function parseOrbitReleaseVersion(value: unknown): OrbitReleaseVersion | 
 }
 
 export function isOrbitReleaseVersion(value: unknown) {
-  return parseOrbitReleaseVersion(value)!==null;
+  return CURRENT_VERSION_PATTERN.test(String(value??'').trim());
 }
 
 export function orbitReleaseVersionFamily(value: unknown) {
