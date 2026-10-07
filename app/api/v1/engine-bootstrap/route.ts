@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { NextResponse } from 'next/server';
 import { db } from '../../../../lib/db';
 import { validateLicense } from '../../../../lib/core/licenses';
+import { getGithubProfile } from '../../../../lib/core/settings';
 
 // Private GitHub source is accessed exclusively by License Manager.
 // Customer Base installations authenticate using their existing licence and installation ID.
@@ -10,8 +11,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const REPO = 'remipetrovich-design/OrbitFS_Engine';
 const BRANCH = 'UPDATE_RELEASE';
+async function engineSource(){
+  const profile=await getGithubProfile();
+  return profile==='fallback'
+    ? {profile,repo:'remipetrovich-design/OrbitFS_Engine',tokenEnv:'ORBITFS_FALLBACK_GITHUB_TOKEN'}
+    : {profile,repo:'lucaskerim123/V1-vercel-engine',tokenEnv:'ORBITFS_RELEASE_DISPATCH_TOKEN'};
+}
 const MAX_FILES = 5000;
 const MAX_UNPACKED = 210 * 1024 * 1024;
 const MAX_ARCHIVE = 75 * 1024 * 1024;
@@ -33,13 +39,13 @@ function componentFor(path: string) {
   for (const component of COMPONENTS) if (path.startsWith('src/addons/' + component + '/')) return component;
   return 'shared';
 }
-function githubToken() {
-  return String(process.env.ORBITFS_FALLBACK_GITHUB_TOKEN || process.env.GITHUB_RELEASE_TOKEN || '').trim();
+function githubToken(source:{tokenEnv:string}) {
+  return String(process.env[source.tokenEnv] || process.env.GITHUB_RELEASE_TOKEN || '').trim();
 }
-async function github(path: string) {
-  const token = githubToken();
+async function github(source:{repo:string;tokenEnv:string},path: string) {
+  const token = githubToken(source);
   if (!token) throw Object.assign(new Error('Private source credential missing'), { status: 503, code: 'ENGINE_SOURCE_CREDENTIAL_MISSING' });
-  const response = await fetch('https://api.github.com/repos/' + REPO + path, {
+  const response = await fetch('https://api.github.com/repos/' + source.repo + path, {
     headers: { authorization: 'Bearer ' + token, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'OrbitFS-Custom-License-Manager' },
     cache: 'no-store', signal: AbortSignal.timeout(30_000),
   });
@@ -80,17 +86,18 @@ function manifestVersion(fetched: Array<{ path: string; bytes: Buffer }>, compon
   return String(match?.[1] || fallback);
 }
 async function snapshot(pinned: string | null, allowHistorical = false) {
-  const repository = await github('');
-  if (String(repository.id) !== '1393749443' || String(repository.full_name).toLowerCase() !== REPO.toLowerCase())
+  const source=await engineSource();
+  const repository = await github(source,'');
+  if (String(repository.full_name).toLowerCase() !== source.repo.toLowerCase())
     throw Object.assign(new Error('Engine repository identity mismatch'), { code: 'ENGINE_SOURCE_IDENTITY_MISMATCH', status: 502 });
-  const ref = await github('/git/ref/heads/' + BRANCH);
+  const ref = await github(source,'/git/ref/heads/' + BRANCH);
   const latest = String(ref.object?.sha || '').toLowerCase();
   if (!/^[a-f0-9]{40}$/.test(latest)) throw Object.assign(new Error('Invalid branch commit'), { code: 'ENGINE_SOURCE_SHA_INVALID', status: 502 });
   // Current branch head is always eligible. Historical commits are eligible only when
   // this same installation was previously authorized for that exact SHA.
   if (pinned && pinned !== latest && !allowHistorical) throw Object.assign(new Error('Branch moved since planning'), { code: 'ENGINE_SOURCE_STALE', status: 409 });
   const sha = pinned || latest;
-  const tree = await github('/git/trees/' + sha + '?recursive=1');
+  const tree = await github(source,'/git/trees/' + sha + '?recursive=1');
   if (tree.truncated || !Array.isArray(tree.tree)) throw Object.assign(new Error('Incomplete source tree'), { code: 'ENGINE_SOURCE_TREE_INCOMPLETE', status: 502 });
   const invalidMigrations = tree.tree.filter((item: any) => item.type === 'blob' && /^supabase\/migrations\/(shared|apex|mcp|studio)\//.test(String(item.path || '')) && String(item.path).endsWith('.sql') && !MIGRATION.test(String(item.path)));
   if (invalidMigrations.length) throw Object.assign(new Error('Invalid migration path'), { code: 'ENGINE_SOURCE_MIGRATION_INVALID', status: 409 });
@@ -106,7 +113,7 @@ async function snapshot(pinned: string | null, allowHistorical = false) {
     while (next < entries.length) {
       const index = next++;
       const item = entries[index];
-      const blob = await github('/git/blobs/' + encodeURIComponent(item.sha));
+      const blob = await github(source,'/git/blobs/' + encodeURIComponent(item.sha));
       if (blob.encoding !== 'base64' || typeof blob.content !== 'string') throw Object.assign(new Error('Invalid Git blob'), { code: 'ENGINE_SOURCE_BLOB_INVALID', status: 502 });
       const bytes = Buffer.from(blob.content.replace(/\s/g, ''), 'base64');
       if (bytes.length !== Number(item.size) || bytes.length > 2 * 1024 * 1024) throw Object.assign(new Error('Invalid source file size'), { code: 'ENGINE_SOURCE_FILE_SIZE_INVALID', status: 502 });
@@ -126,7 +133,7 @@ async function snapshot(pinned: string | null, allowHistorical = false) {
   }));
   const packageJson = JSON.parse(fetched.find((entry) => entry.path === 'package.json')!.bytes.toString('utf8'));
   const version = String(packageJson.version || '0.0.0');
-  const releaseId = 'github:' + REPO + '@' + sha;
+  const releaseId = 'github:' + source.repo + '@' + sha;
   const componentVersions = Object.fromEntries(COMPONENTS.map((component) => [component, manifestVersion(fetched, component, version)]));
   const packageData = {
     format: 'orbitfs-engine-release-v3', schemaVersion: 3, version, releaseId, sourceCommit: sha,
@@ -137,7 +144,7 @@ async function snapshot(pinned: string | null, allowHistorical = false) {
   };
   const archive = gzipSync(Buffer.from(JSON.stringify(packageData)), { level: 9 });
   if (archive.length > MAX_ARCHIVE) throw Object.assign(new Error('Engine archive exceeds size limit'), { code: 'ENGINE_ARCHIVE_TOO_LARGE', status: 502 });
-  return { archive, sha, version, releaseId, fileCount: files.length, checksum: createHash('sha256').update(archive).digest('hex') };
+  return { archive, sha, version, releaseId, sourceRepo:source.repo, fileCount: files.length, checksum: createHash('sha256').update(archive).digest('hex') };
 }
 export async function GET(request: Request) {
   try {
@@ -155,7 +162,7 @@ export async function GET(request: Request) {
     if (url.searchParams.get('download') === '1')
       return new Response(new Uint8Array(result.archive), { headers: { 'content-type': 'application/gzip', 'cache-control': 'private, no-store', 'x-orbitfs-source-sha': result.sha, 'x-orbitfs-artifact-sha256': result.checksum } });
     return NextResponse.json({ ok: true, release: {
-      id: result.releaseId, version: result.version, sourceCommit: result.sha, sourceRepo: REPO,
+      id: result.releaseId, version: result.version, sourceCommit: result.sha, sourceRepo: result.sourceRepo,
       sourceRef: BRANCH, checksum: result.checksum, fileCount: result.fileCount, components: COMPONENTS,
       minimumEngineDeployerProtocol: 1, minimumBaseVersion: '1.0.0', checkpointRequired: true,
     } }, { headers: { 'cache-control': 'private, no-store' } });
