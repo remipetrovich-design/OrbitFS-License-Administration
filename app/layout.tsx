@@ -9,9 +9,9 @@ type GithubProfileStatus={
   repository:string;
 };
 
-const LOCAL_PROFILE='fallback' as const;
-const LOCAL_LABEL='Remi fallback';
-const LOCAL_REPOSITORY='remipetrovich-design/OrbitFS-License-Administration';
+const LOCAL_PROFILE='primary' as const;
+const LOCAL_LABEL='Primary';
+const LOCAL_REPOSITORY='lucaskerim123/Custom-licence-manager';
 
 async function githubProfileStatus():Promise<GithubProfileStatus>{
   try{
