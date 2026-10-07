@@ -28,11 +28,27 @@ jobs:
         id: profile
         shell: bash
         env:
-          EXPECTED_GITHUB_PROFILE: primary
+          EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
-          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+          profile_file="$(mktemp)"
+          trap 'rm -f "$profile_file"' EXIT
+          status="$(curl --silent --show-error --retry 2 --retry-delay 2 --output "$profile_file" --write-out '%{http_code}' https://incendiarynetworks.cc/api/v1/github-profile || true)"
+          case "$status" in
+            200)
+              response="$(cat "$profile_file")"
+              active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
+              ;;
+            404)
+              active="fallback"
+              echo "License Manager source-mode endpoint is not deployed yet; using the migration bootstrap default: fallback."
+              ;;
+            *)
+              echo "::error::License Manager source-mode check failed (HTTP $status)."
+              cat "$profile_file"
+              exit 1
+              ;;
+          esac
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
@@ -58,8 +74,18 @@ jobs:
           test "${GITHUB_REF}" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
           test "$(git rev-parse --is-shallow-repository)" = "false"
-          git fetch origin main --prune
-          test "$(git rev-parse origin/main)" = "${GITHUB_SHA}"
+          git fetch --no-tags --prune origin +refs/heads/main:refs/remotes/origin/main
+          main_sha="$(git rev-parse refs/remotes/origin/main)"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "$main_sha"; then
+            echo "::error::Selected deployment commit ${GITHUB_SHA} is no longer part of current main history (${main_sha})."
+            exit 1
+          fi
+          if [ "$main_sha" != "${GITHUB_SHA}" ]; then
+            echo "main advanced after workflow dispatch."
+            echo "Selected deployment commit: ${GITHUB_SHA}"
+            echo "Current main commit: $main_sha"
+            echo "Continuing with the immutable commit captured by workflow_dispatch."
+          fi
           test -n "$VERCEL_TOKEN"
           test -n "$VERCEL_ORG_ID"
           test -n "$VERCEL_PROJECT_ID"
@@ -223,3 +249,5 @@ jobs:
           echo "Branch: main"
           echo "Commit: $GITHUB_SHA"
           echo "Deployment: $deployment_url"
+
+
