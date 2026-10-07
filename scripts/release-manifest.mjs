@@ -11,7 +11,7 @@ if (shallow !== "false") {
 }
 
 const requestedBase = String(process.env.RELEASE_BASE_SHA || "").trim();
-const currentRepository = String(process.env.GITHUB_REPOSITORY || "remipetrovich-design/OrbitFS-License-Administration").trim();
+const currentRepository = String(process.env.GITHUB_REPOSITORY || "lucaskerim123/Custom-licence-manager").trim();
 const requestedBaseRepository = String(process.env.RELEASE_BASE_REPOSITORY || currentRepository).trim();
 
 if (requestedBaseRepository !== currentRepository) {
