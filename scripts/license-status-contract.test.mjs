@@ -8,10 +8,10 @@ function loadStatusModule(){
   const compiled=ts.transpileModule(source,{
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}
   }).outputText;
-  const module={exports:{}};
+  const moduleShim={exports:{}};
   const fn=new Function('exports','module','require',compiled);
-  fn(module.exports,module,()=>{throw new Error('license-status.ts must stay dependency-free')});
-  return module.exports;
+  fn(moduleShim.exports,moduleShim,()=>{throw new Error('license-status.ts must stay dependency-free')});
+  return moduleShim.exports;
 }
 
 const {canonicalLicenseStatus,canonicalComponentStatus}=loadStatusModule();
