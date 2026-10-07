@@ -1,10 +1,10 @@
 name: License Master Build Check
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
-  workflow_call:
 
 permissions:
   contents: read
@@ -22,27 +22,11 @@ jobs:
         id: profile
         shell: bash
         env:
-          EXPECTED_GITHUB_PROFILE: fallback
+          EXPECTED_GITHUB_PROFILE: primary
         run: |
           set -euo pipefail
-          profile_file="$(mktemp)"
-          trap 'rm -f "$profile_file"' EXIT
-          status="$(curl --silent --show-error --retry 2 --retry-delay 2 --output "$profile_file" --write-out '%{http_code}' https://incendiarynetworks.cc/api/v1/github-profile || true)"
-          case "$status" in
-            200)
-              response="$(cat "$profile_file")"
-              active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
-              ;;
-            404)
-              active="fallback"
-              echo "License Manager source-mode endpoint is not deployed yet; using the migration bootstrap default: fallback."
-              ;;
-            *)
-              echo "::error::License Manager source-mode check failed (HTTP $status)."
-              cat "$profile_file"
-              exit 1
-              ;;
-          esac
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://dev.incendiarynetworks.cc/api/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
@@ -71,6 +55,14 @@ jobs:
       - name: Test release manifest local baseline resolution
         if: steps.profile.outputs.run == 'true'
         run: node scripts/release-manifest.test.mjs
+
+      - name: Test canonical licence status contract
+        if: steps.profile.outputs.run == 'true'
+        run: node --test scripts/license-status-contract.test.mjs
+
+      - name: Test scoped licence query filter
+        if: steps.profile.outputs.run == 'true'
+        run: node --test scripts/license-query-filter.test.mjs
 
       - name: Typecheck
         if: steps.profile.outputs.run == 'true'
