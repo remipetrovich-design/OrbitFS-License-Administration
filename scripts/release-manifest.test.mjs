@@ -35,14 +35,14 @@ const targetHead=commit(target,"next change");
 
 run(target,process.execPath,[manifestScript],{
  RELEASE_BASE_SHA:targetBase,
- RELEASE_BASE_REPOSITORY:"lucaskerim123/Custom-licence-manager",
- GITHUB_REPOSITORY:"lucaskerim123/Custom-licence-manager",
+ RELEASE_BASE_REPOSITORY:"remipetrovich-design/OrbitFS-License-Administration",
+ GITHUB_REPOSITORY:"remipetrovich-design/OrbitFS-License-Administration",
  GITHUB_REF_NAME:"main"
 });
 const localManifest=JSON.parse(readFileSync(join(target,"release-manifest.json"),"utf8"));
 if(localManifest.schemaVersion!==3)throw new Error("Expected release manifest schemaVersion 3");
 if(localManifest.previousDeploymentSha!==targetBase)throw new Error("Local production SHA was not preserved");
-if(localManifest.previousDeploymentRepository!=="lucaskerim123/Custom-licence-manager")throw new Error("Local repository identity was not preserved");
+if(localManifest.previousDeploymentRepository!=="remipetrovich-design/OrbitFS-License-Administration")throw new Error("Local repository identity was not preserved");
 if(localManifest.changeBaseSha!==targetBase)throw new Error("Local production baseline changed unexpectedly");
 if(localManifest.changeBaseSource!=="previous-production-deployment")throw new Error("Local baseline source changed unexpectedly");
 if(localManifest.headSha!==targetHead)throw new Error("Target HEAD mismatch");
@@ -53,7 +53,7 @@ try{
  run(target,process.execPath,[manifestScript],{
   RELEASE_BASE_SHA:targetBase,
   RELEASE_BASE_REPOSITORY:"other-owner/other-license-manager",
-  GITHUB_REPOSITORY:"lucaskerim123/Custom-licence-manager",
+  GITHUB_REPOSITORY:"remipetrovich-design/OrbitFS-License-Administration",
   GITHUB_REF_NAME:"main"
  });
 }catch{rejected=true}
