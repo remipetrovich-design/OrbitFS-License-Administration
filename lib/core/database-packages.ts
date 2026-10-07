@@ -13,11 +13,11 @@ const TRANSACTION_SQL=/\b(?:begin|commit|rollback)\s*;/i;
 
 const CENTRAL_DATABASE_SOURCE_REPO='lucaskerim123/Master-Database-System';
 const LEGACY_DATABASE_SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
-  base:['remipetrovich-design/OrbitFS-Base-System'],
-  'engine-shared':['remipetrovich-design/OrbitFS_Engine'],
-  mcp:['remipetrovich-design/OrbitFS_Engine'],
-  apex:['remipetrovich-design/OrbitFS_Engine'],
-  studio:['remipetrovich-design/OrbitFS_Engine']
+  base:['lucaskerim123/V1-vercel-base'],
+  'engine-shared':['lucaskerim123/V1-vercel-engine'],
+  mcp:['lucaskerim123/V1-vercel-engine'],
+  apex:['lucaskerim123/V1-vercel-engine'],
+  studio:['lucaskerim123/V1-vercel-engine']
 };
 const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
   base:[CENTRAL_DATABASE_SOURCE_REPO,...LEGACY_DATABASE_SOURCE_REPOS.base],
@@ -74,6 +74,12 @@ export function validateDatabasePackage(input:any){
 
   const sourceCommit=String(input.sourceCommit||'').trim().toLowerCase();
   if(!/^[a-f0-9]{40}$/.test(sourceCommit))throw new Error('DATABASE_PACKAGE_SOURCE_COMMIT_INVALID');
+
+  const validation=input?.validation;
+  const expectedValidationProject=selected==='base'?'nktlwumvncdchdbfpwyt':'jbbiufdfhbyieanuaujn';
+  if(validation?.format!=='orbitfs-real-supabase-validation-v1'||validation?.status!=='passed'||validation?.provider!=='supabase'||String(validation?.projectRef||'')!==expectedValidationProject||String(validation?.sourceCommit||'').toLowerCase()!==sourceCommit){
+    throw new Error('DATABASE_PACKAGE_REAL_VALIDATION_REQUIRED');
+  }
 
   const databaseSchemaVersion=Number(input.databaseSchemaVersion);
   if(!Number.isInteger(databaseSchemaVersion)||databaseSchemaVersion<1)throw new Error('DATABASE_PACKAGE_SCHEMA_VERSION_INVALID');
@@ -284,6 +290,8 @@ export async function resolveDatabasePackageForRelease(componentValue:string){
        and source_repo=$2
        and database_target='customer'
        and status in ('candidate','current')
+       and package->'validation'->>'format'='orbitfs-real-supabase-validation-v1'
+       and package->'validation'->>'status'='passed'
      order by created_at desc
      limit 1`,
     [selected,CENTRAL_DATABASE_SOURCE_REPO]
@@ -319,7 +327,7 @@ export async function getCurrentDatabasePackage(componentValue:string){
   const selected=component(componentValue);
   const sourceRepo=await activeSourceRepoForComponent(selected);
   const central=(await db().query(
-    "select * from database_packages where component=$1 and source_repo=$2 and database_target='customer' and status='current' order by published_at desc nulls last,created_at desc limit 1",
+    "select * from database_packages where component=$1 and source_repo=$2 and database_target='customer' and status='current' and package->'validation'->>'format'='orbitfs-real-supabase-validation-v1' and package->'validation'->>'status'='passed' order by published_at desc nulls last,created_at desc limit 1",
     [selected,sourceRepo]
   )).rows[0]||null;
   if(central)return central;
@@ -343,8 +351,12 @@ type ReleaseDatabasePackageReference={
 function releaseDatabaseComponents(row:any):CustomerDatabaseComponent[]{
   if(String(row?.release_type||'')==='base')return ['base'];
   const components=Array.isArray(row?.manifest?.components)?row.manifest.components:[];
-  const selected=[...new Set(components.map((value:any)=>String(value||'').trim().toLowerCase()).filter((value:string)=>['mcp','apex','studio'].includes(value)))];
-  return ['engine-shared',...selected] as CustomerDatabaseComponent[];
+  const selected:string[]=[...new Set<string>(components.map((value:any)=>String(value||'').trim().toLowerCase()).filter((value:string)=>['base','mcp','apex','studio'].includes(value)))];
+  const required:CustomerDatabaseComponent[]=[];
+  if(selected.includes('base'))required.push('base');
+  const engineComponents=selected.filter((value:string)=>['mcp','apex','studio'].includes(value)) as CustomerDatabaseComponent[];
+  if(engineComponents.length)required.push('engine-shared',...engineComponents);
+  return required;
 }
 
 function releaseDatabaseReferences(row:any):ReleaseDatabasePackageReference[]{
@@ -374,6 +386,15 @@ export async function validateReleaseDatabasePackages(row:any){
   const ids=refs.map((ref)=>ref.id);
   if(ids.some((id)=>!/^[0-9a-f-]{36}$/i.test(id))||new Set(ids).size!==ids.length){
     return {ok:false,message:'Database package references contain an invalid or duplicate id.'};
+  }
+
+  const authoritative=await resolveDatabasePackageSetForRelease(required);
+  const authoritativeByComponent=new Map(authoritative.map((item:any)=>[String(item.component),String(item.id)]));
+  for(const ref of refs){
+    const selectedId=authoritativeByComponent.get(ref.component);
+    if(!selectedId||selectedId!==ref.id){
+      return {ok:false,message:'DATABASE_PACKAGE_SELECTION_STALE:'+ref.component};
+    }
   }
   const rows=(await db().query(
     `select id,component,source_repo,source_commit,database_schema_version,package_sha256,status
