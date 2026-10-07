@@ -1,0 +1,29 @@
+name: Central Database Source Guard
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'database/migrations/**'
+      - 'database/schema.sql'
+      - 'database/migrate.sql'
+  pull_request:
+    paths:
+      - 'database/migrations/**'
+      - 'database/schema.sql'
+      - 'database/migrate.sql'
+
+permissions:
+  contents: read
+
+jobs:
+  reject-duplicate-database-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Database source moved to Master Database System
+        run: |
+          echo "::error::OrbitFS database source is centralized in lucaskerim123/Master-Database-System."
+          echo "::error::Do not add or edit database schema/migration SQL in this repository."
+          echo "::error::Make the database change in Master-Database-System, then let the release/deployment workflow consume the central package."
+          exit 1
