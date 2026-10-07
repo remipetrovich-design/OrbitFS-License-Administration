@@ -13,11 +13,11 @@ const TRANSACTION_SQL=/\b(?:begin|commit|rollback)\s*;/i;
 
 const CENTRAL_DATABASE_SOURCE_REPO='lucaskerim123/Master-Database-System';
 const LEGACY_DATABASE_SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
-  base:['lucaskerim123/V1-vercel-base'],
-  'engine-shared':['lucaskerim123/V1-vercel-engine'],
-  mcp:['lucaskerim123/V1-vercel-engine'],
-  apex:['lucaskerim123/V1-vercel-engine'],
-  studio:['lucaskerim123/V1-vercel-engine']
+  base:['remipetrovich-design/OrbitFS-Base-System'],
+  'engine-shared':['remipetrovich-design/OrbitFS_Engine'],
+  mcp:['remipetrovich-design/OrbitFS_Engine'],
+  apex:['remipetrovich-design/OrbitFS_Engine'],
+  studio:['remipetrovich-design/OrbitFS_Engine']
 };
 const SOURCE_REPOS:Record<CustomerDatabaseComponent,readonly string[]>={
   base:[CENTRAL_DATABASE_SOURCE_REPO,...LEGACY_DATABASE_SOURCE_REPOS.base],
