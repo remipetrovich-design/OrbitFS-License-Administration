@@ -21,8 +21,8 @@ export async function GET() {
       capabilities: {
         license_validation: Boolean(settings?.system_enabled&&settings?.licensing_enabled&&!settings?.maintenance_mode),
         license_issuance: Boolean(settings?.system_enabled&&settings?.licensing_enabled&&!settings?.maintenance_mode),
-        releases: Boolean(settings?.system_enabled&&settings?.release_system_enabled),
-        deployment: Boolean(settings?.system_enabled&&settings?.deployment_enabled),
+        releases: Boolean(settings?.system_enabled&&settings?.release_system_enabled&&!settings?.maintenance_mode),
+        deployment: Boolean(settings?.system_enabled&&settings?.deployment_enabled&&!settings?.maintenance_mode),
       },
       system_name: settings?.system_name ?? 'License Manager',
       external_authority_online: Boolean(settings?.system_enabled),
