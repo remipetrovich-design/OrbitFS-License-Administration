@@ -8,15 +8,31 @@ function connectionString() {
 
   try {
     const url = new URL(raw);
-    if (url.hostname.startsWith('db.') && url.hostname.endsWith('.supabase.co')) {
+    const directSupabase = url.hostname.startsWith('db.') && url.hostname.endsWith('.supabase.co');
+    const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
+
+    if (directSupabase) {
       const ref = url.hostname.slice(3, -'.supabase.co'.length);
-      const poolerHost = process.env.SUPABASE_POOLER_HOST || 'aws-0-ap-southeast-2.pooler.supabase.com';
+      const poolerHost = String(process.env.SUPABASE_POOLER_HOST || '').trim();
+      if (!poolerHost) {
+        throw new Error('SUPABASE_POOLER_HOST is required when DATABASE_URL uses a direct Supabase database host');
+      }
       url.hostname = poolerHost;
       url.port = '6543';
       if (url.username === 'postgres') url.username = `postgres.${ref}`;
+      url.searchParams.set('pgbouncer', 'true');
       return url.toString();
     }
-  } catch {
+
+    if (supabasePooler) {
+      // Vercel/serverless traffic must use the transaction pooler. Port 5432 is
+      // Supabase session mode and can exhaust the small per-project session pool.
+      url.port = '6543';
+      url.searchParams.set('pgbouncer', 'true');
+      return url.toString();
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('SUPABASE_POOLER_HOST is required')) throw error;
     // Let pg report an invalid DATABASE_URL rather than hiding configuration errors.
   }
   return raw;
@@ -26,7 +42,7 @@ export function db() {
   if (!pool) {
     pool = new Pool({
       connectionString: connectionString(),
-      max: 5,
+      max: Math.max(1, Number(process.env.DB_POOL_MAX || 2)),
       min: 0,
       idleTimeoutMillis: 10_000,
       connectionTimeoutMillis: 5_000,
