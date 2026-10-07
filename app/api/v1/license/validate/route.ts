@@ -63,7 +63,7 @@ export async function POST(request: Request) {
 
       const suppliedReleaseId = String(body?.release_id ?? body?.releaseId ?? '').trim();
       const profile=await getGithubProfile();
-      const engineRepo=profile==='fallback'?'remipetrovich-design/OrbitFS_Engine':'lucaskerim123/V1-vercel-engine';
+      const engineRepo=profile==='fallback'?'remipetrovich-design/OrbitFS_Engine':'remipetrovich-design/OrbitFS_Engine';
       const branchPrefix = 'github:' + engineRepo + '@';
       const engineBranchReleaseId = suppliedReleaseId.startsWith(branchPrefix) && /^[a-f0-9]{40}$/i.test(suppliedReleaseId.slice(branchPrefix.length)) ? suppliedReleaseId : null;
       if (suppliedReleaseId && !engineBranchReleaseId && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(suppliedReleaseId)) {
