@@ -31,6 +31,7 @@ if (vercelConfig?.git?.deploymentEnabled !== false) {
 
 run("Clean locked dependency install", npm, ["ci"]);
 run("Whitespace / patch integrity", "git", ["diff", "--check"]);
+run("Database release package contract", "node", ["scripts/database-release-contract.test.mjs"]);
 run("Lint", npm, ["run", "lint"]);
 run("Typecheck", npm, ["run", "typecheck"]);
 run("Production dependency audit", npm, ["audit", "--omit=dev", "--audit-level=high"]);
