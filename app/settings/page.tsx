@@ -46,9 +46,8 @@ async function switchGithubProfile(formData:FormData){
  const next=String(formData.get('profile')||'') as GithubProfileName;
  const expected=String(formData.get('expected_profile')||'') as GithubProfileName;
  if(!['primary','fallback'].includes(next)||!['primary','fallback'].includes(expected))return;
- const vercelConfirmed=formData.get('vercel_confirmed')==='on';
- const confirmation=String(formData.get('confirmation')||'');
- await setGithubProfile(next,expected,confirmation,vercelConfirmed,user.id,user.email);
+ const acknowledged=formData.get('acknowledged')==='on';
+ await setGithubProfile(next,expected,acknowledged,user.id,user.email);
  revalidatePath('/settings');revalidatePath('/');
 }
 

@@ -244,13 +244,11 @@ export async function toggleSetting(field:SettingField,actorUserId:string,actor:
   return setSetting(field,!Boolean(current?.[field]),actorUserId,actor);
 }
 
-let githubProfileCache:{value:GithubProfileName;expires:number}|null=null;
 export async function getGithubProfile():Promise<GithubProfileName>{
-  if(githubProfileCache&&githubProfileCache.expires>Date.now())return githubProfileCache.value;
+  // Read authoritative DB state each time: a stale 20-minute cache could
+  // let the former GitHub/Vercel family continue working after a switch.
   const row=(await db().query('select github_profile from system_settings where id=true')).rows[0];
-  const profile:GithubProfileName=String(row?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
-  githubProfileCache={value:profile,expires:Date.now()+20*60*1000};
-  return profile;
+  return String(row?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
 }
 
 const GITHUB_PROFILE_TARGETS:Record<GithubProfileName,{tokenEnv:string;repos:Array<{repo:string;ref:string}>}>={
@@ -277,17 +275,12 @@ const GITHUB_PROFILE_TARGETS:Record<GithubProfileName,{tokenEnv:string;repos:Arr
 };
 
 function githubCredentialCandidates(profile:GithubProfileName){
-  const target=GITHUB_PROFILE_TARGETS[profile];
-  const names=[
-    target.tokenEnv,
-    profile==='primary'?'ORBITFS_PRIMARY_GITHUB_TOKEN':'ORBITFS_FALLBACK_GITHUB_TOKEN',
-    'ORBITFS_RELEASE_DISPATCH_TOKEN',
-    'GITHUB_RELEASE_TOKEN',
-    'GITHUB_TOKEN',
-    'GITHUB_ACTIONS_TOKEN',
-  ];
-  return [...new Set(names)]
-    .map(name=>({name,value:String(process.env[name]||'').trim()}))
+  // A GitHub account is verified only with its own account token. Never
+  // silently use the Main token to authenticate a Fallback handoff.
+  const names=profile==='primary'
+    ? ['ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN']
+    : ['ORBITFS_FALLBACK_GITHUB_TOKEN'];
+  return names.map(name=>({name,value:String(process.env[name]||'').trim()}))
     .filter(item=>Boolean(item.value));
 }
 
@@ -315,73 +308,77 @@ async function verifyGithubProfileTarget(profile:GithubProfileName){
   return checked;
 }
 
-const GITHUB_PROFILE_ACTIVATION:Record<GithubProfileName,{repo:string;workflow:string}>={
-  primary:{repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml'},
-  fallback:{repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml'},
+type VercelWorkflowTarget={
+  repo:string;file:string;team:string;project:string;
+};
+const VERCEL_WORKFLOWS:Record<GithubProfileName,VercelWorkflowTarget[]>={
+ primary:[
+  {repo:'lucaskerim123/Custom-licence-manager',file:'quick-deploy.yml',team:'team_W3fS0X03YCjNkD2BoqRj6Uld',project:'prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv'},
+  {repo:'lucaskerim123/Dev-panel',file:'deploy-dev-panel.yml',team:'team_W3fS0X03YCjNkD2BoqRj6Uld',project:'prj_o5ju4zFGSDZelX4SA7GAu3rQqtap'},
+  {repo:'lucaskerim123/V2_Billing_Store',file:'quick-redesign-deploy.yml',team:'team_W3fS0X03YCjNkD2BoqRj6Uld',project:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd'},
+ ],
+ fallback:[
+  {repo:'remipetrovich-design/OrbitFS-License-Administration',file:'quick-deploy.yml',team:'team_0fWVaLb24pyeeCRqqYu5G47K',project:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8'},
+  {repo:'remipetrovich-design/OrbitFS-Control-Centre',file:'deploy-dev-panel.yml',team:'team_0fWVaLb24pyeeCRqqYu5G47K',project:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ'},
+  {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',file:'quick-redesign-deploy.yml',team:'team_0fWVaLb24pyeeCRqqYu5G47K',project:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq'},
+ ],
 };
 
-async function prepareGithubProfileActivation(profile:GithubProfileName){
-  const target=GITHUB_PROFILE_ACTIVATION[profile];
-  const credentials=githubCredentialCandidates(profile);
+async function verifyVercelWorkflowTargets(profile:GithubProfileName){
+ const credentials=githubCredentialCandidates(profile);
+ const targets=VERCEL_WORKFLOWS[profile];
+ const checked:Array<{repo:string;team:string;project:string}>=[];
+ for(const target of targets){
+  let valid=false;
   for(const credential of credentials){
-    const headers:Record<string,string>={
-      accept:'application/vnd.github+json',
-      authorization:'Bearer '+credential.value,
-      'x-github-api-version':'2022-11-28',
-    };
-    const response=await fetch('https://api.github.com/repos/'+target.repo+'/actions/workflows/'+encodeURIComponent(target.workflow),{headers,cache:'no-store'});
-    if(response.ok)return {...target,credential:credential.name,token:credential.value};
+   const response=await fetch(
+    'https://api.github.com/repos/'+target.repo+'/contents/.github/workflows/'+target.file+'?ref=main',
+    {headers:{accept:'application/vnd.github+json',authorization:'Bearer '+credential.value,'x-github-api-version':'2022-11-28'},
+     cache:'no-store',signal:AbortSignal.timeout(10000)});
+   if(!response.ok)continue;
+   const body=await response.json();
+   if(body.encoding!=='base64'||typeof body.content!=='string')continue;
+   const yaml=Buffer.from(body.content.replace(/\\s/g,''),'base64').toString('utf8');
+   const read=(key:string)=>new RegExp('^\\s*'+key+':\\s*([^\\s#]+)','m').exec(yaml)?.[1]||'';
+   if(read('VERCEL_ORG_ID')!==target.team||read('VERCEL_PROJECT_ID')!==target.project){
+    throw new Error('Wrong Vercel target in '+target.repo+' workflow '+target.file+
+      '. Correct its account/project configuration before switching.');
+   }
+   if(!yaml.includes('EXPECTED_GITHUB_PROFILE: '+profile)||
+      !yaml.includes('secrets.VERCEL_TOKEN')){
+    throw new Error('Source profile or production Vercel token check is missing in '+target.repo);
+   }
+   valid=true;break;
   }
-  throw new Error('Cannot activate '+profile.toUpperCase()+': no configured target GitHub credential can access '+target.repo+' workflow '+target.workflow);
-}
-
-async function dispatchGithubProfileActivation(activation:{repo:string;workflow:string;credential:string;token:string}){
-  let lastError='unknown GitHub error';
-  for(let attempt=1;attempt<=3;attempt++){
-    const response=await fetch('https://api.github.com/repos/'+activation.repo+'/actions/workflows/'+encodeURIComponent(activation.workflow)+'/dispatches',{
-      method:'POST',
-      headers:{
-        accept:'application/vnd.github+json',
-        authorization:'Bearer '+activation.token,
-        'content-type':'application/json',
-        'x-github-api-version':'2022-11-28',
-      },
-      body:JSON.stringify({ref:'main'}),
-      cache:'no-store',
-    });
-    if(response.status===204)return;
-    const body=await response.text().catch(()=>'');
-    lastError='GitHub HTTP '+response.status+(body?' · '+body.slice(0,300):'');
-    if(attempt<3&&[429,500,502,503,504].includes(response.status))await new Promise(resolve=>setTimeout(resolve,attempt*500));
-    else break;
-  }
-  throw new Error('Target Control Centre activation dispatch failed: '+lastError);
+  if(!valid)throw new Error('Could not verify the production Vercel workflow in '+target.repo+
+    '. Check '+profile+' GitHub account token permissions.');
+  checked.push({repo:target.repo,team:target.team,project:target.project});
+ }
+ return checked;
 }
 
 export async function setGithubProfile(
   next:GithubProfileName,
   expected:GithubProfileName,
-  confirmation:string,
-  vercelConfirmed:boolean,
+  acknowledged:boolean,
   actorUserId:string|null,
   actor:string,
 ){
   if(next!=='primary'&&next!=='fallback')throw new Error('Invalid GitHub profile');
   if(expected!=='primary'&&expected!=='fallback')throw new Error('Invalid current GitHub profile');
   if(next===expected)throw new Error('Requested GitHub profile is already active');
-  const phrase=next==='primary'?'SWITCH TO MAIN':'SWITCH TO FALLBACK';
-  if(String(confirmation||'')!==phrase)throw new Error('Source-mode confirmation did not match '+phrase);
-  if(!vercelConfirmed)throw new Error('Confirm the Vercel Git connections and latest source sync before switching.');
+  if(!acknowledged)throw new Error('Tick the switch acknowledgment checkbox before changing source mode');
 
-  const currentChecked=await verifyGithubProfileTarget(expected);
+  // Do all external preflight checks before the DB transaction. If a target
+  // account or deployment project is not configured, the switch stays put.
   const checked=await verifyGithubProfileTarget(next);
-  const activation=await prepareGithubProfileActivation(next);
+  const destinations=await verifyVercelWorkflowTargets(next);
   const pool=db();
   const client=await pool.connect();
   try{
     await client.query('begin');
     const current=(await client.query('select system_enabled,github_profile from system_settings where id=true for update')).rows[0];
-    const actual=String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
+    const actual=String(current?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
     if(Boolean(current?.system_enabled))throw new Error('Master Authority must be OFF before changing MAIN/FALLBACK mode');
     if(actual!==expected)throw new Error('Source mode changed since this page was loaded. Refresh before switching.');
     const updated=(await client.query('update system_settings set github_profile=$1,updated_at=now() where id=true returning *',[next])).rows[0];
@@ -389,50 +386,15 @@ export async function setGithubProfile(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
        values($1,$2,'github_profile.changed','system_settings','github_profile',$3)`,
       [actorUserId,actor,JSON.stringify({
-        from:actual,
-        to:next,
-        master_authority_offline:true,
-        vercel_and_latest_source_confirmed:true,
-        current_github_targets:currentChecked,
-        github_targets:checked,
-        shared_history_credentials_verified:true,
-        control_centre_activation:{repository:activation.repo,workflow:activation.workflow,credential:activation.credential},
+        from:actual,to:next,master_authority_offline:true,
+        acknowledged:true,github_targets:checked,
+        vercel_deployment_workflows:destinations,
+        database_source:'lucaskerim123/Master-Database-System',
+        database_changes:false,deployments_triggered:false,
       })],
     );
     await client.query('commit');
-    githubProfileCache={value:next,expires:Date.now()+20*60*1000};
-    try{
-      await dispatchGithubProfileActivation(activation);
-      await pool.query(
-        `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
-         values($1,$2,'github_profile.activation_dispatched','system_settings','github_profile',$3)`,
-        [actorUserId,actor,JSON.stringify({profile:next,repository:activation.repo,workflow:activation.workflow,credential:activation.credential})],
-      ).catch(()=>{});
-      return updated;
-    }catch(error){
-      const recovery=await pool.connect();
-      try{
-        await recovery.query('begin');
-        const current=(await recovery.query('select system_enabled,github_profile from system_settings where id=true for update')).rows[0];
-        const active=String(current?.github_profile||'fallback').toLowerCase()==='primary'?'primary':'fallback';
-        if(active===next&&!Boolean(current?.system_enabled)){
-          await recovery.query('update system_settings set github_profile=$1,updated_at=now() where id=true',[actual]);
-          githubProfileCache={value:actual,expires:Date.now()+20*60*1000};
-          await recovery.query(
-            `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
-             values($1,$2,'github_profile.activation_failed_reverted','system_settings','github_profile',$3)`,
-            [actorUserId,actor,JSON.stringify({attempted:next,reverted_to:actual,repository:activation.repo,workflow:activation.workflow,error:error instanceof Error?error.message:String(error)})],
-          );
-        }
-        await recovery.query('commit');
-      }catch(recoveryError){
-        await recovery.query('rollback').catch(()=>{});
-        throw new Error('Source mode activation failed and automatic rollback also failed: '+(recoveryError instanceof Error?recoveryError.message:String(recoveryError)));
-      }finally{
-        recovery.release();
-      }
-      throw error;
-    }
+    return updated;
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;
