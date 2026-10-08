@@ -2,7 +2,9 @@
 import {useState} from 'react';
 
 export default function ApiKeyForm({action,scopes}:{action:(formData:FormData)=>Promise<string|undefined>;scopes:string[]}){
- const [selected,setSelected]=useState<string[]>(scopes);
+ // Newly introduced database package privileges must be explicitly selected.
+ const initialScopes=()=>scopes.filter(scope=>!scope.startsWith('database.packages.'));
+ const [selected,setSelected]=useState<string[]>(initialScopes);
  const [created,setCreated]=useState('');
 
  async function submit(e:React.FormEvent<HTMLFormElement>){
@@ -11,7 +13,7 @@ export default function ApiKeyForm({action,scopes}:{action:(formData:FormData)=>
   const fd=new FormData(form);
   fd.set('scopes',selected.join(','));
   const key=await action(fd);
-  if(key){setCreated(key);form.reset();setSelected(scopes)}
+  if(key){setCreated(key);form.reset();setSelected(initialScopes())}
  }
 
  return <div className="api-key-create-panel">

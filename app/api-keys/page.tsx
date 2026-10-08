@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader';
 import TableTools from '../components/TableTools';
 
 export const dynamic='force-dynamic';
-const scopes:ApiScope[]=['license.issue','license.validate','license.manage','releases.read','releases.write','deployment.read','deployment.write'];
+const scopes:ApiScope[]=['license.issue','license.validate','license.manage','releases.read','releases.write','deployment.read','deployment.write','database.packages.read','database.packages.write','database.packages.control'];
 
 async function create(formData:FormData){
  'use server';

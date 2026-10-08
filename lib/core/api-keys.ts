@@ -28,6 +28,11 @@ function scopeAllows(granted: ApiScope[], required: ApiScope) {
   if (granted.includes('releases.control') && ['releases.write', 'releases.read'].includes(required)) return true;
   if (granted.includes('releases.write') && required === 'releases.read') return true;
   if (granted.includes('deployment.write') && required === 'deployment.read') return true;
+  // Existing deployer keys predate the database package registry. A credential
+  // authorized to execute a customer deployment must be able to read the
+  // immutable database package required by that deployment, without gaining
+  // package write/control privileges or weakening unrelated read-only keys.
+  if (granted.includes('deployment.write') && required === 'database.packages.read') return true;
   if (granted.includes('database.packages.control') && ['database.packages.write', 'database.packages.read'].includes(required)) return true;
   if (granted.includes('database.packages.write') && required === 'database.packages.read') return true;
   return false;
