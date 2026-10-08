@@ -1,13 +1,15 @@
 'use client';
-import {useState} from 'react';
+import {useActionState,useState} from 'react';
 import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
+export type SourceSwitchResult={status:'idle'|'error'|'success';message:string};
 type Props={
  profile:GithubProfile;
  masterOffline:boolean;
  canManage:boolean;
- action:(formData:FormData)=>Promise<void>;
+ action:(previous:SourceSwitchResult,formData:FormData)=>Promise<SourceSwitchResult>;
+ missingRequirements?:string[];
 };
 
 const mappings={
@@ -38,12 +40,13 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
-export default function GithubProfileControl({profile,masterOffline,canManage,action}:Props){
+export default function GithubProfileControl({profile,masterOffline,canManage,action,missingRequirements=[]}:Props){
  const [acknowledged,setAcknowledged]=useState(false);
+ const [result,formAction,isPending]=useActionState(action,{status:'idle',message:''});
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
- const canSwitch=canManage&&masterOffline&&acknowledged;
+ const canSwitch=canManage&&masterOffline&&acknowledged&&!isPending&&missingRequirements.length===0;
 
  return <section className="github-mode-panel" aria-label="Main and fallback source mode">
    <span className="authority-hardware-screw screw-tl" aria-hidden="true"/>
@@ -58,7 +61,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <strong>{masterOffline?'MASTER OFF':'SWITCH LOCKED'}</strong>
       <small>{masterOffline?'Tick the checkbox to unlock the lever':'Turn Master Authority OFF first'}</small>
     </div></div>
-    <form action={action}>
+    <form action={formAction}>
      <input type="hidden" name="profile" value={target}/>
      <input type="hidden" name="expected_profile" value={profile}/>
      <div className="github-mode-console">
@@ -70,6 +73,16 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
         <span className="github-mode-lamp is-red" aria-hidden="true"/><strong>FALLBACK</strong><small>remipetrovich-design · Fallback Vercel</small>
        </div>
      </div>
+     {missingRequirements.length>0&&<div role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #e1a72e',borderRadius:8,background:'rgba(245,158,11,.10)',fontSize:12}}>
+       <strong>{targetLabel} switch is not ready: missing Production connections.</strong>
+       <p>Add these to the <strong>MAIN License Manager → Vercel → Production</strong> environment, then redeploy License Manager:</p>
+       <ul style={{paddingLeft:20,marginTop:6}}>{missingRequirements.map(key=><li key={key}><code>{key}</code></li>)}</ul>
+       <p>These are server-side preflight credentials. They can use your existing account tokens; the two GitHub/Vercel families must remain separate.</p>
+     </div>}
+     {result.status==='error'&&<p role="alert" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #dc5555',borderRadius:8,background:'rgba(239,68,68,.12)',fontSize:12}}>
+       <strong>Switch not completed.</strong> {result.message} The active mode was not changed by this failed request.
+     </p>}
+     {result.status==='success'&&<p role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #3b9d72',borderRadius:8,fontSize:12}}>{result.message}</p>}
      {canManage&&<label className="github-mode-confirm-check">
        <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!masterOffline}
          onChange={event=>setAcknowledged(event.target.checked)} required/>

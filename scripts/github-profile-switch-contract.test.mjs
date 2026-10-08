@@ -50,3 +50,19 @@ test('account switch verifies real Vercel projects before changing source author
  for(const id of ['prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv','prj_rCooJWY8JMkBjekXLO8scT35UPJ8'])
    assert.ok(verifier.includes(id));
 });
+
+test('failed source switch returns a safe inline form error instead of a Next.js digest',()=>{
+ assert.match(page,/use server/);
+ assert.match(page,/try\{\s*await setGithubProfile\(next,expected,acknowledged,user\.id,user\.email\);/);
+ assert.match(page,/catch\(error\)\{/);
+ assert.match(page,/status:'error',message:/);
+ assert.match(control,/useActionState\(action/);
+ assert.match(control,/role="alert"/);
+ assert.match(control,/Switch not completed/);
+});
+test('page names both prerequisite credentials and prevents an invalid target click',()=>{
+ assert.match(page,/ORBITFS_FALLBACK_GITHUB_TOKEN/);
+ assert.match(page,/ORBITFS_FALLBACK_VERCEL_TOKEN/);
+ assert.match(control,/missingRequirements\.length===0/);
+ assert.match(control,/MAIN License Manager/);
+});

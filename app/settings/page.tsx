@@ -6,6 +6,7 @@ import SideNav from '../components/SideNav';
 import PageHeader from '../components/PageHeader';
 import AuthorityControlGrid from '../components/AuthorityControlGrid';
 import GithubProfileControl from '../components/GithubProfileControl';
+import type {SourceSwitchResult} from '../components/GithubProfileControl';
 
 export const dynamic='force-dynamic';
 
@@ -40,15 +41,24 @@ async function updateSettings(formData:FormData){
  revalidatePath('/settings');revalidatePath('/');
 }
 
-async function switchGithubProfile(formData:FormData){
+async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormData):Promise<SourceSwitchResult>{
  'use server';
- const user=await requireUser();if(user.role!=='owner')return;
+ const user=await requireUser();
+ if(user.role!=='owner')return {status:'error',message:'Only the License Manager owner can switch Main/Fallback.'};
  const next=String(formData.get('profile')||'') as GithubProfileName;
  const expected=String(formData.get('expected_profile')||'') as GithubProfileName;
- if(!['primary','fallback'].includes(next)||!['primary','fallback'].includes(expected))return;
+ if(!['primary','fallback'].includes(next)||!['primary','fallback'].includes(expected))
+  return {status:'error',message:'Invalid source mode. Refresh the page and try again.'};
  const acknowledged=formData.get('acknowledged')==='on';
- await setGithubProfile(next,expected,acknowledged,user.id,user.email);
+ try{
+  await setGithubProfile(next,expected,acknowledged,user.id,user.email);
+ }catch(error){
+  // Return a visible form error instead of throwing through Next.js server
+  // actions, which produces an opaque production error digest.
+  return {status:'error',message:error instanceof Error?error.message:'Source-mode check failed. No change was made.'};
+ }
  revalidatePath('/settings');revalidatePath('/');
+ return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+'. Reload the page to verify the selected account.'};
 }
 
 async function updatePolicy(formData:FormData){
@@ -190,7 +200,11 @@ export default async function Settings(){
 
   <section className="section">
    <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">MAIN / FALLBACK sits directly above the authority board. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
-   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}/>
+   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}
+      missingRequirements={githubProfile==='primary'
+       ? ['ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN'].filter(key=>!String(process.env[key]||'').trim() || /^(change-me|placeholder|replace-with)/i.test(String(process.env[key]||'').trim()))
+       : ['ORBITFS_MAIN_VERCEL_TOKEN',...(!String(process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim()?['ORBITFS_PRIMARY_GITHUB_TOKEN or ORBITFS_RELEASE_DISPATCH_TOKEN']:[])].filter(key=>key.includes(' or ')||!String(process.env[key]||'').trim())}
+     />
    <AuthorityControlGrid rows={rows} canManage={canManage} action={updateSettings}/>
   </section>
 

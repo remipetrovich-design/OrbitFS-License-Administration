@@ -370,6 +370,13 @@ export async function setGithubProfile(
   if(next===expected)throw new Error('Requested GitHub profile is already active');
   if(!acknowledged)throw new Error('Tick the switch acknowledgment checkbox before changing source mode');
 
+  // First verify the authority interlock and stale form data. The DB
+  // transaction below repeats both checks under a row lock before mutation.
+  const before=(await db().query('select system_enabled,github_profile from system_settings where id=true')).rows[0];
+  if(Boolean(before?.system_enabled))throw new Error('Turn Master Authority OFF before changing MAIN/FALLBACK mode.');
+  const prior=String(before?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
+  if(prior!==expected)throw new Error('Source mode changed since this page loaded. Refresh first.');
+
   // Do all external preflight checks before the DB transaction. If a target
   // account or deployment project is not configured, the switch stays put.
   const checked=await verifyGithubProfileTarget(next);
