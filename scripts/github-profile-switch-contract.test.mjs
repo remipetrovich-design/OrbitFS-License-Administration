@@ -39,3 +39,14 @@ test('Vercel workflow mappings are account- and project-specific',()=>{
   assert.ok(settings.includes(id),id);
  assert.match(settings,/Source profile or production Vercel token check is missing/);
 });
+
+test('account switch verifies real Vercel projects before changing source authority',()=>{
+ const verifier=readFileSync('lib/core/source-vercel.ts','utf8');
+ assert.match(settings,/verifyVercelAccountProjects\(next\)/);
+ assert.match(verifier,/ORBITFS_MAIN_VERCEL_TOKEN/);
+ assert.match(verifier,/ORBITFS_FALLBACK_VERCEL_TOKEN/);
+ assert.match(verifier,/actual\.accountId!==target\.teamId/);
+ assert.match(verifier,/No source mode changed/);
+ for(const id of ['prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv','prj_rCooJWY8JMkBjekXLO8scT35UPJ8'])
+   assert.ok(verifier.includes(id));
+});

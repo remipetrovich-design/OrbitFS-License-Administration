@@ -1,4 +1,5 @@
 import { db } from '../db';
+import {verifyVercelAccountProjects} from './source-vercel';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
 export type GithubProfileName='primary'|'fallback';
@@ -373,6 +374,7 @@ export async function setGithubProfile(
   // account or deployment project is not configured, the switch stays put.
   const checked=await verifyGithubProfileTarget(next);
   const destinations=await verifyVercelWorkflowTargets(next);
+  const projects=await verifyVercelAccountProjects(next);
   const pool=db();
   const client=await pool.connect();
   try{
@@ -389,6 +391,7 @@ export async function setGithubProfile(
         from:actual,to:next,master_authority_offline:true,
         acknowledged:true,github_targets:checked,
         vercel_deployment_workflows:destinations,
+        verified_vercel_projects:projects,
         database_source:'lucaskerim123/Master-Database-System',
         database_changes:false,deployments_triggered:false,
       })],
