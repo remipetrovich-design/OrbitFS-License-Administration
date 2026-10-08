@@ -59,6 +59,14 @@ function releaseProfileForRepo(value:unknown):ReleaseSourceProfile|null{
 function releaseSourceForProfile(profile:ReleaseSourceProfile,releaseType:unknown){
  return String(releaseType||'').toLowerCase()==='base'?RELEASE_SYSTEMS[profile].base:RELEASE_SYSTEMS[profile].update;
 }
+function releaseSourceReposForRow(row:any){
+ const profile=releaseProfileForRepo(row?.source_repo);
+ return profile?[releaseSourceForProfile(profile,row?.release_type).repo]:releaseSourceRepos(row?.release_type);
+}
+function baseSourceReposForRow(row:any){
+ const profile=releaseProfileForRepo(row?.source_repo);
+ return profile?[RELEASE_SYSTEMS[profile].base.repo]:[...ALL_BASE_SOURCE_REPOS];
+}
 function expectedReleaseSourceForRow(row:any){
  const profile=releaseProfileForRepo(row?.source_repo);
  if(!profile)return null;
@@ -805,7 +813,7 @@ async function validateUpdateBaseCompatibility(row:any){
     and r.status='published'
     and r.review_status='approved'
     and r.archived_at is null
-  order by r.published_at desc nulls last,r.created_at desc`,[baseChannel,[...ALL_BASE_SOURCE_REPOS]])).rows;
+  order by r.published_at desc nulls last,r.created_at desc`,[baseChannel,baseSourceReposForRow(row)])).rows;
  const compatible=rows.filter((base:any)=>{
    const comparison=compareOrbitReleaseVersions(String(base.version||''),minimumVersion);
    return comparison!==null&&comparison>=0;
@@ -859,7 +867,7 @@ async function validateVersionProgression(row:any){
     and r.status='published' and r.review_status='approved'
     and r.source_repo=any($5::text[])
     and r.archived_at is null and r.id<>$4
-  order by r.published_at desc nulls last,r.created_at desc`,[row.product_id,row.channel,row.release_type,row.id,releaseSourceRepos(row.release_type)])).rows;
+  order by r.published_at desc nulls last,r.created_at desc`,[row.product_id,row.channel,row.release_type,row.id,releaseSourceReposForRow(row)])).rows;
  const previous=published.find((candidate:any)=>orbitReleaseVersionFamily(candidate.version)===family);
  if(!previous)return {key:'version_progression',ok:true,message:`No previous published ${family||'OrbitFS'} ${row.release_type} version exists in ${row.channel}; ${version} starts that version line.`};
  const cmp=compareOrbitReleaseVersions(version,previous.version);
@@ -983,10 +991,10 @@ export async function publishRelease(id:string,actorUserId?:string|null,actor?:s
   // Update versions remain independently published, but a newer package revision of
   // the same Update version supersedes older package revisions of that exact version.
   if(row.release_type==='base'){
-   await client.query('select pg_advisory_xact_lock(hashtext($1))',[String(row.product_id)+':'+String(row.channel)+':base']);
+   await client.query('select pg_advisory_xact_lock(hashtext($1))',[String(row.product_id)+':'+String(row.channel)+':base:'+String(releaseProfileForRepo(row.source_repo)||'unknown')]);
    const currentlyPublished=(await client.query(
     "select id,version,published_at from releases where product_id=$1 and channel=$2 and release_type='base' and source_repo=any($4::text[]) and status='published' and id<>$3 order by published_at desc nulls last,created_at desc for update",
-    [row.product_id,row.channel,id,[...ALL_BASE_SOURCE_REPOS]]
+    [row.product_id,row.channel,id,releaseSourceReposForRow(row)]
    )).rows;
    immediatePrevious=currentlyPublished[0]||null;
 
@@ -999,13 +1007,13 @@ export async function publishRelease(id:string,actorUserId?:string|null,actor?:s
 
    archivedHistory=(await client.query(
     "update releases set archived_at=coalesce(archived_at,now()),archived_by=coalesce(archived_by,$3::uuid) where product_id=$1 and channel=$2 and release_type='base' and source_repo=any($5::text[]) and status='superseded' and archived_at is null and ($4::uuid is null or id<>$4::uuid) returning id,version,published_at,archived_at",
-    [row.product_id,row.channel,actorUserId??null,immediatePrevious?.id??null,[...ALL_BASE_SOURCE_REPOS]]
+    [row.product_id,row.channel,actorUserId??null,immediatePrevious?.id??null,releaseSourceReposForRow(row)]
    )).rows;
   }else if(row.release_type==='update'){
-   await client.query('select pg_advisory_xact_lock(hashtext($1))',[String(row.product_id)+':'+String(row.channel)+':update:'+String(row.version)]);
+   await client.query('select pg_advisory_xact_lock(hashtext($1))',[String(row.product_id)+':'+String(row.channel)+':update:'+String(releaseProfileForRepo(row.source_repo)||'unknown')+':'+String(row.version)]);
    const sameVersionPublished=(await client.query(
     "select id,version,published_at,revision from releases where product_id=$1 and channel=$2 and release_type='update' and version=$3 and source_repo=any($5::text[]) and status='published' and id<>$4 order by revision desc,published_at desc nulls last,created_at desc for update",
-    [row.product_id,row.channel,row.version,id,[...ALL_UPDATE_SOURCE_REPOS]]
+    [row.product_id,row.channel,row.version,id,releaseSourceReposForRow(row)]
    )).rows;
    immediatePrevious=sameVersionPublished[0]||null;
    if(sameVersionPublished.length){
@@ -1164,7 +1172,7 @@ export async function rollbackBaseRelease(id:string,actorUserId?:string|null,act
  if(current.status!=='published')throw new Error('Only a published Base deployment can be rolled back.');
  const previous=(await pool.query(
   "select r.*,p.slug product from releases r join products p on p.id=r.product_id where r.product_id=$1 and r.channel=$2 and r.release_type='base' and r.source_repo=any($5::text[]) and r.status in ('superseded','published','disabled') and r.review_status='approved' and r.id<>$3 and r.published_at < $4 order by r.published_at desc nulls last,r.created_at desc limit 1",
-  [current.product_id,current.channel,id,current.published_at,[...ALL_BASE_SOURCE_REPOS]]
+  [current.product_id,current.channel,id,current.published_at,releaseSourceReposForRow(current)]
  )).rows[0];
  if(!previous||previous.manifest?.validation?.status!=='passed'||!validationIdentityMatches(previous))throw new Error('No previous validated Base deployment is available for rollback.');
  const revision=Number((await pool.query('select coalesce(max(revision),0)::int revision from releases where product_id=$1 and channel=$2 and version=$3 and release_type=\'base\' and source_repo=$4',[previous.product_id,previous.channel,previous.version,previous.source_repo])).rows[0].revision||0)+1;
