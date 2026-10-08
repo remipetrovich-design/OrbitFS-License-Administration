@@ -56,7 +56,7 @@ test('failed source switch returns a safe inline form error instead of a Next.js
  assert.match(page,/try\{\s*await setGithubProfile\(next,expected,acknowledged,user\.id,user\.email\);/);
  assert.match(page,/catch\(error\)\{/);
  assert.match(page,/status:'error',message:/);
- assert.match(control,/useActionState\(action/);
+ assert.match(control,/useActionState(?:<[^>]+>)?\(action/);
  assert.match(control,/role="alert"/);
  assert.match(control,/Switch not completed/);
 });
