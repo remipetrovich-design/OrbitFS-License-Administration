@@ -42,7 +42,7 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
 
 export default function GithubProfileControl({profile,masterOffline,canManage,action,missingRequirements=[]}:Props){
  const [acknowledged,setAcknowledged]=useState(false);
- const [result,formAction,isPending]=useActionState(action,{status:'idle',message:''});
+ const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
