@@ -19,8 +19,8 @@ jobs:
       name: production
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: team_W3fS0X03YCjNkD2BoqRj6Uld
-      VERCEL_PROJECT_ID: prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv
+      VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_PROJECT_ID: prj_rCooJWY8JMkBjekXLO8scT35UPJ8
       VERCEL_CLI_VERSION: 59.23.1
 
     steps:
@@ -31,24 +31,8 @@ jobs:
           EXPECTED_GITHUB_PROFILE: fallback
         run: |
           set -euo pipefail
-          profile_file="$(mktemp)"
-          trap 'rm -f "$profile_file"' EXIT
-          status="$(curl --silent --show-error --retry 2 --retry-delay 2 --output "$profile_file" --write-out '%{http_code}' https://incendiarynetworks.cc/api/v1/github-profile || true)"
-          case "$status" in
-            200)
-              response="$(cat "$profile_file")"
-              active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
-              ;;
-            404)
-              active="fallback"
-              echo "License Manager source-mode endpoint is not deployed yet; using the migration bootstrap default: fallback."
-              ;;
-            *)
-              echo "::error::License Manager source-mode check failed (HTTP $status)."
-              cat "$profile_file"
-              exit 1
-              ;;
-          esac
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 https://incendiarynetworks.cc/api/v1/github-profile)"
+          active="$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(String(x.profile||""))' "$response")"
           echo "Active GitHub profile: $active"
           echo "Expected for this repository: $EXPECTED_GITHUB_PROFILE"
           if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
