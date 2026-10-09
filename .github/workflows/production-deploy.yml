@@ -21,6 +21,7 @@ jobs:
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_SCOPE: splashincau-7868s-projects
       VERCEL_PROJECT_ID: prj_rCooJWY8JMkBjekXLO8scT35UPJ8
       VERCEL_CLI_VERSION: 59.23.1
 
@@ -172,7 +173,7 @@ jobs:
 
       - name: Pull production configuration only
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
 
       - name: Verify pulled production project identity
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
@@ -189,7 +190,7 @@ jobs:
 
       - name: Build exact production artifact without deploying
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
-        run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
+        run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
 
       - name: Verify prebuilt production artifact locally
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') }}
@@ -221,7 +222,7 @@ jobs:
           github_repo="${GITHUB_REPOSITORY#*/}"
           deployment_url="$(vercel deploy --prebuilt --archive=tgz --prod --yes \
             --token="$VERCEL_TOKEN" \
-            --scope="$VERCEL_ORG_ID" \
+            --scope="$VERCEL_SCOPE" \
             --meta "githubCommitSha=$GITHUB_SHA" \
             --meta "githubCommitRef=main" \
             --meta "githubOrg=$github_org" \
