@@ -1,4 +1,4 @@
-name: Dispatch License Manager DB fix deploy
+name: Fallback License Manager TLS Recovery
 
 on:
   push:
@@ -7,16 +7,69 @@ on:
       - .github/workflows/dispatch-db-fix-deploy.yml
 
 permissions:
-  actions: write
   contents: read
 
+concurrency:
+  group: fallback-license-manager-recovery
+  cancel-in-progress: false
+
 jobs:
-  dispatch:
+  deploy:
+    if: github.repository == 'remipetrovich-design/OrbitFS-License-Administration' && contains(github.event.head_commit.message, 'Run fallback LM TLS recovery')
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_PROJECT_ID: prj_rCooJWY8JMkBjekXLO8scT35UPJ8
+      VERCEL_SCOPE: splashincau-7868s-projects
     steps:
-      - name: Dispatch Quick Deploy
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check out Fallback main at dispatched commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate repair and deployment identity
+        shell: bash
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error -X POST             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             -H "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/quick-deploy.yml/dispatches"             -d '{"ref":"main"}'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          grep -F 'url.searchParams.delete(key)' lib/db.ts
+          test -n "$VERCEL_TOKEN"
+          test -f package-lock.json
+          test -f vercel.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and typecheck
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@59.23.1
+      - name: Pull Fallback production configuration
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+      - name: Verify exact Fallback Vercel project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const p = require('./.vercel/project.json');
+          if (p.orgId !== process.env.VERCEL_ORG_ID || p.projectId !== process.env.VERCEL_PROJECT_ID) {
+            throw new Error('Refusing to deploy to the wrong Vercel project');
+          }
+          NODE
+      - name: Build from current Fallback main
+        run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+      - name: Deploy only the Fallback License Manager
+        run: |
+          set -euo pipefail
+          vercel deploy --prebuilt --archive=tgz --prod --yes \
+            --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" \
+            --meta "githubCommitSha=$GITHUB_SHA" \
+            --meta "githubCommitRef=main" \
+            --meta "githubOrg=remipetrovich-design" \
+            --meta "githubRepo=OrbitFS-License-Administration"
