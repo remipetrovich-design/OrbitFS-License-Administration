@@ -113,11 +113,12 @@ export async function reconcileCurrentSourceServiceDeployments(actorUserId:strin
  if(recent.rowCount)return {profile,queued:[] as string[],ready:false,pending:true};
  // A source switch may have been interrupted. Provision only the selected account's
  // production secrets; then ask the selected workflows to create their own builds.
+ const licenseEnv=await syncLicenseManagerAccountConnections(profile);
  const changed=await syncSourceGitHubCredentials(profile);
  const queued=await dispatchSourceProductionDeployments(profile,before.services.filter(s=>!s.ready).map(s=>s.repo));
  await db().query(
   "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'github_profile.services_queued','system_settings','github_profile',$3)",
-  [actorUserId,actor,JSON.stringify({profile,credential_targets:changed,deployments_queued:queued,database_changed:false,domains_changed:false})]
+  [actorUserId,actor,JSON.stringify({profile,credential_targets:changed,license_manager_connections:licenseEnv,deployments_queued:queued,database_changed:false,domains_changed:false})]
  );
  return {profile,queued,ready:false};
 }

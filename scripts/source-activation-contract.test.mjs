@@ -13,6 +13,13 @@ test('exact three services per account, with distinct project IDs',()=>{
  assert.match(source,/environments\/production/);
  assert.match(source,/secrets\/VERCEL_TOKEN/);
 });
+test('two Vercel accounts keep their own License Manager connections without GitHub plaintext',()=>{
+ assert.match(source,/syncLicenseManagerAccountConnections/);
+ assert.match(source,/env\?upsert=true&teamId=/);
+ assert.match(source,/ORBITFS_MAIN_VERCEL_TOKEN/);
+ assert.match(source,/ORBITFS_FALLBACK_VERCEL_TOKEN/);
+ assert.match(source,/type:'sensitive'/);
+});
 test('github action secret is sealed and only server-side, never plaintext in Git',()=>{
  assert.match(source,/crypto_box_seal/);
  assert.match(source,/secrets\/public-key/);

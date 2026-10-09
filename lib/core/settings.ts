@@ -1,6 +1,6 @@
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
-import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments} from './source-activation';
+import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections} from './source-activation';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
 export type GithubProfileName='primary'|'fallback';
@@ -385,6 +385,7 @@ export async function setGithubProfile(
   const projects=await verifyVercelAccountProjects(next);
   // Before changing authoritative mode, securely install the correct Vercel
   // account token into each selected GitHub Production environment.
+  const vercelLicenseCredentials=await syncLicenseManagerAccountConnections(next);
   const githubSecrets=await syncSourceGitHubCredentials(next);
   const pool=db();
   const client=await pool.connect();
@@ -404,6 +405,7 @@ export async function setGithubProfile(
         vercel_deployment_workflows:destinations,
         verified_vercel_projects:projects,
         verified_github_production_credentials:githubSecrets,
+        synchronized_license_manager_connections:vercelLicenseCredentials,
         database_source:'lucaskerim123/Master-Database-System',
         database_changes:false,deployments_triggered:false,
       })],
