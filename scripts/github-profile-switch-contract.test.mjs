@@ -53,7 +53,7 @@ test('account switch verifies real Vercel projects before changing source author
 
 test('failed source switch returns a safe inline form error instead of a Next.js digest',()=>{
  assert.match(page,/use server/);
- assert.match(page,/try\{\s*await setGithubProfile\(next,expected,acknowledged,user\.id,user\.email\);/);
+ assert.match(page,/try\{\s*const switched=await setGithubProfile\(next,expected,acknowledged,user\.id,user\.email\);/);
  assert.match(page,/catch\(error\)\{/);
  assert.match(page,/status:'error',message:/);
  assert.match(control,/useActionState(?:<[^>]+>)?\(action/);
