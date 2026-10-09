@@ -43,7 +43,8 @@ jobs:
             throw new Error('License Manager database health failed');
           }
           console.log('Database-backed health confirmed');
-          console.log('External API authority enabled: ' + String(body.external_authority_online));
+          if (body.external_authority_online !== false) throw new Error('External API must remain disabled during Fallback admin smoke test');
+          console.log('External API authority remains disabled, as intended');
           NODE
           check source /api/v1/github-profile 200
           node - "$dir/source.json" <<'NODE'
