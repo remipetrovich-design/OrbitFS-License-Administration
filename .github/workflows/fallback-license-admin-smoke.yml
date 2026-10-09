@@ -43,8 +43,8 @@ jobs:
             throw new Error('License Manager database health failed');
           }
           console.log('Database-backed health confirmed');
-          if (body.external_authority_online !== false) throw new Error('External API must remain disabled during Fallback admin smoke test');
-          console.log('External API authority remains disabled, as intended');
+          if (body.external_authority_online !== true || !body.capabilities.license_validation || !body.capabilities.releases || !body.capabilities.deployment) throw new Error('Fallback external API authority/capabilities are not enabled');
+          console.log('Fallback external API authority and required capabilities enabled');
           NODE
           check source /api/v1/github-profile 200
           node - "$dir/source.json" <<'NODE'
@@ -53,5 +53,16 @@ jobs:
           if (body.profile !== 'fallback') throw new Error('Unexpected source mode');
           console.log('Source mode confirmed: fallback');
           NODE
+          check registry '/api/v1/api-connections?client=dev_panel&service=license_manager' 200
+          node - "$dir/registry.json" <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const urls = (body.connections || []).map(item => item.base_url);
+          const expected = 'https://lm.incendiarynetworks.cc/api/v1';
+          if (!urls.includes(expected)) throw new Error('Fallback registry does not advertise the Fallback License Manager: ' + JSON.stringify(urls));
+          console.log('Fallback API registry advertises correct License Manager');
+          NODE
           check protected_releases /api/v1/releases 401
+          check protected_licenses /api/v1/license 401
+          check protected_channels /api/v1/release-channels 401
           echo 'Fallback admin login, database, source mode and API authorization smoke PASSED'
