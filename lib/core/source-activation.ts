@@ -76,14 +76,16 @@ export async function syncSourceGitHubCredentials(profile:SourceFamily){
  * selected account's existing License Manager Vercel Production project.
  */
 export async function syncLicenseManagerAccountConnections(profile:SourceFamily){
- const {vercel,teamId}=credentials(profile);
+ const {vercel,teamId,github:accountGitHub}=credentials(profile);
  const service=WORKFLOWS[profile].find(item=>item.repo.toLowerCase().includes('licen'));
  if(!service)throw new Error('License Manager project mapping is not configured for selected source mode.');
  const keys=['ORBITFS_MAIN_VERCEL_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN',
   'ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'];
  const changed:string[]=[];
  for(const key of keys){
-  const value=String(process.env[key]||'').trim();
+  // Release workflow dispatch belongs to the selected GitHub account.
+  // Never copy the Main GitHub release credential into Fallback.
+  const value=key==='ORBITFS_RELEASE_DISPATCH_TOKEN'?accountGitHub:String(process.env[key]||'').trim();
   if(!value||/^(change-me|replace-with|placeholder|your-)/i.test(value))continue;
   let response:Response;
   try{
