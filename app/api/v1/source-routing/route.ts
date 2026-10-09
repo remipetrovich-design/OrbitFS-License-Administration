@@ -31,8 +31,10 @@ async function isReady(projectId:string,token:string,teamId:string):Promise<bool
       headers:{authorization:'Bearer '+token,accept:'application/json'}});
     if(!response.ok)return false;
     const result=await response.json() as {deployments?:Array<{readyState?:string;state?:string;target?:string}>};
+    // The Vercel state+target query already scopes this list. Vercel may
+    // omit target from individual response items; use the READY state only.
     return Array.isArray(result.deployments)&&result.deployments.some(d=>
-      (d.readyState==='READY'||d.state==='READY')&&(d.target===undefined||d.target==='production')
+      d.readyState==='READY'||d.state==='READY'
     );
   }catch{return false;}
 }
@@ -43,7 +45,7 @@ async function reachableProductionPage(url:string):Promise<boolean>{
     // server errors or Vercel Authentication. Probe the fixed public URL too.
     const response=await fetch(url,{
       method:'GET',cache:'no-store',redirect:'manual',
-      signal:AbortSignal.timeout(2500),headers:{accept:'text/html'}
+      signal:AbortSignal.timeout(6500),headers:{accept:'text/html'}
     });
     // Login redirects are allowed; Vercel login protection (401/403)
     // and application errors cannot receive user traffic.
@@ -75,7 +77,10 @@ function familyReadiness(profile:'primary'|'fallback'){
 export async function GET(){
  try{
   const profile=await getGithubProfile();
-  const ready=await familyReadiness(profile);
+  // MAIN is the permanent entrypoint: it never requires a cross-account
+  // redirect. Do not mark routing incomplete because of an unnecessary
+  // self-probe from a Vercel function back into its own main domain.
+  const ready=profile==='primary'?{panel:true,billing:true}:await familyReadiness(profile);
   const destinations=profile==='fallback'?FALLBACK_DESTINATIONS:PRIMARY_DESTINATIONS;
   return NextResponse.json({
     profile,
