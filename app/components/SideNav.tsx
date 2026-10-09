@@ -7,7 +7,7 @@ const groups=[
  {label:'Overview',items:[['overview','/','Dashboard','⌂']]},
  {label:'Authority',items:[['licenses','/licenses','Licensing','◇'],['installations','/installations','Installations','▣']]},
  {label:'Release operations',items:[['base','/releases/base','Base Deployment','↳'],['releases','/releases','Release Updates','↻'],['channels','/releases/channels','Release Channels','≡']]},
- {label:'System',items:[['products','/products','Products','◈'],['users','/users','Users','●'],['settings','/settings','API Control','⚡'],['api-connections','/api-connections','API Connections','⇄'],['api-keys','/api-keys','API Access','⌁'],['api','/api-docs','API Contract','</>']]}
+ {label:'System',items:[['products','/products','Products','◈'],['users','/users','Users','●'],['settings','/settings','API Control','⚡'],['api-keys','/api-keys','API Access','⌁'],['api','/api-docs','API Contract','</>']]}
 ] as const;
 
 export default function SideNav({active}:{active?:string}){
