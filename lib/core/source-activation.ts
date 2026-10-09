@@ -1,6 +1,6 @@
 import {db} from '../db';
 import type {SourceFamily} from './source-vercel';
-import {configuredVercelFamily} from './source-vercel';
+import {configuredVercelFamily,verifyVercelAccountProjects} from './source-vercel';
 
 type Service = {repo:string;workflow:string;projectId:string};
 const WORKFLOWS:Record<SourceFamily,Service[]>={
@@ -23,6 +23,39 @@ function credentials(profile:SourceFamily){
  if(!github||!vercel||/^(change-me|replace-with|placeholder|your-)/i.test(github)||/^(change-me|replace-with|placeholder|your-)/i.test(vercel))
   throw new Error('The active account GitHub/Vercel connection tokens are missing. Set the matching ORBITFS account tokens in License Manager Production.');
  return {github,vercel,teamId:configuredVercelFamily(profile).teamId};
+}
+
+/**
+ * Replicate only selected account-switch credentials to the standby
+ * License Manager Vercel Production project. Credentials are never
+ * persisted to Git or the License Manager database.
+ */
+export async function syncLicenseManagerAccountConnections(profile:SourceFamily){
+ const {vercel,teamId,github:accountGitHub}=credentials(profile);
+ const service=WORKFLOWS[profile][0];
+ const names=['ORBITFS_MAIN_VERCEL_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN',
+  'ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN'];
+ const updated:string[]=[];
+ for(const key of names){
+  // Release workflow dispatch belongs to the selected GitHub account.
+  // Never copy the Main GitHub release credential into Fallback.
+  const value=key==='ORBITFS_RELEASE_DISPATCH_TOKEN'?accountGitHub:String(process.env[key]||'').trim();
+  if(!value||/^(change-me|replace-with|placeholder|your-)/i.test(value))continue;
+  let response:Response;
+  try{
+   response=await fetch('https://api.vercel.com/v10/projects/'+encodeURIComponent(service.projectId)+
+    '/env?upsert=true&teamId='+encodeURIComponent(teamId),{
+    method:'POST',cache:'no-store',signal:AbortSignal.timeout(12000),
+    headers:{authorization:'Bearer '+vercel,accept:'application/json','content-type':'application/json'},
+    body:JSON.stringify({key,value,target:['production'],type:'sensitive',
+      comment:'Managed by authoritative License Manager source switch'})
+   });
+  }catch{throw new Error('Vercel account connection sync failed for '+service.repo);}
+  if(!response.ok)throw new Error('Vercel rejected a required account connection for '+service.repo+
+   ' (HTTP '+response.status+'). Check selected Vercel account access.');
+  updated.push(key);
+ }
+ return updated;
 }
 
 async function github(path:string,token:string,method='GET',payload?:Record<string,string>){
@@ -67,40 +100,36 @@ export async function syncSourceGitHubCredentials(profile:SourceFamily){
  return updated;
 }
 
-/**
- * Keep account-switch credentials available to the selected License Manager.
- * The same authority database remains authoritative; no runtime licence,
- * schema, release or customer-deployer settings are changed here.
- *
- * Only known, non-empty connection tokens are transported over HTTPS to the
- * selected account's existing License Manager Vercel Production project.
+/** Repair the standby GitHub Actions environment while MAIN is selected.
+ * This is an explicit owner action, not a public GET and not a source switch.
+ * The Fallback Vercel token is sealed in GitHub before any future handoff.
  */
-export async function syncLicenseManagerAccountConnections(profile:SourceFamily){
- const {vercel,teamId,github:accountGitHub}=credentials(profile);
- const service=WORKFLOWS[profile].find(item=>item.repo.toLowerCase().includes('licen'));
- if(!service)throw new Error('License Manager project mapping is not configured for selected source mode.');
- const keys=['ORBITFS_MAIN_VERCEL_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN',
-  'ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'];
- const changed:string[]=[];
- for(const key of keys){
-  // Release workflow dispatch belongs to the selected GitHub account.
-  // Never copy the Main GitHub release credential into Fallback.
-  const value=key==='ORBITFS_RELEASE_DISPATCH_TOKEN'?accountGitHub:String(process.env[key]||'').trim();
-  if(!value||/^(change-me|replace-with|placeholder|your-)/i.test(value))continue;
-  let response:Response;
-  try{
-   response=await fetch('https://api.vercel.com/v10/projects/'+encodeURIComponent(service.projectId)+
-    '/env?upsert=true&teamId='+encodeURIComponent(teamId),{
-     method:'POST',cache:'no-store',signal:AbortSignal.timeout(12000),
-     headers:{authorization:'Bearer '+vercel,'content-type':'application/json',accept:'application/json'},
-     body:JSON.stringify({key,value,type:'sensitive',target:['production']})
-   });
-  }catch{throw new Error('Could not reach '+profile+' Vercel when preparing License Manager connections.');}
-  if(!response.ok)throw new Error('Could not prepare License Manager '+key+' in '+profile+
-   ' Vercel Production (HTTP '+response.status+'). No secret values were logged.');
-  changed.push(key);
- }
- return changed;
+export async function prepareFallbackGithubProduction(actorUserId:string|null,actor:string){
+ const state=(await db().query('select system_enabled,github_profile from system_settings where id=true')).rows[0];
+ if(Boolean(state?.system_enabled))throw new Error('Turn Master Authority OFF before preparing Fallback Production connections.');
+ if(String(state?.github_profile)!=='primary')
+  throw new Error('MAIN must be active to prepare Fallback without switching. Refresh the page.');
+
+ const {github:token}=credentials('fallback');
+ // Verify token ownership before touching any repository secrets.
+ const identity=await github('/user',token) as {login?:string};
+ if(String(identity.login||'').toLowerCase()!=='remipetrovich-design')
+  throw new Error('Fallback GitHub credential is not authenticated as remipetrovich-design.');
+ await verifyVercelAccountProjects('fallback');
+ // Existing implementation encrypts the selected Fallback Vercel token using
+ // each repository Production environment's public key, then writes only its
+ // VERCEL_TOKEN secret. Never read back encrypted Vercel Environment values.
+ const repositories=await syncSourceGitHubCredentials('fallback');
+ await db().query(
+  `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+   values($1,$2,'github_profile.fallback_prepared','system_settings','github_profile',$3)`,
+  [actorUserId,actor,JSON.stringify({
+   profile:'primary',standby:'fallback',github_secrets:repositories,
+   secret_name:'VERCEL_TOKEN',scope:'production',
+   deployments_triggered:false,source_mode_changed:false,database_changed:false,
+  })]
+ );
+ return {repositories,prepared:repositories.length===3};
 }
 
 async function latestReadyDeployment(service:Service,token:string,teamId:string){

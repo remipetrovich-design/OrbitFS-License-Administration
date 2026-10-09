@@ -7,7 +7,7 @@ import PageHeader from '../components/PageHeader';
 import AuthorityControlGrid from '../components/AuthorityControlGrid';
 import GithubProfileControl from '../components/GithubProfileControl';
 import type {SourceSwitchResult} from '../components/GithubProfileControl';
-import {reconcileCurrentSourceServiceDeployments} from '../../lib/core/source-activation';
+import {reconcileCurrentSourceServiceDeployments,prepareFallbackGithubProduction} from '../../lib/core/source-activation';
 
 export const dynamic='force-dynamic';
 
@@ -65,6 +65,19 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
  revalidatePath('/settings');revalidatePath('/');
  return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
   '. The target service production builds were requested. Domain routing is not complete until all three are healthy.'};
+}
+
+async function prepareFallbackConnections():Promise<{status:'success'|'error';message:string}>{
+ 'use server';
+ const user=await requireUser();
+ if(user.role!=='owner')return {status:'error',message:'Only the License Manager owner can prepare Fallback Production.'};
+ try{
+  const result=await prepareFallbackGithubProduction(user.id,user.email);
+  if(!result.prepared)return {status:'error',message:'Only '+result.repositories.length+' of the three Fallback repositories were prepared. Check credentials and retry.'};
+  return {status:'success',message:'Fallback GitHub Production VERCEL_TOKEN securely updated in all 3 repositories. MAIN remains active. No deployments started.'};
+ }catch(error){
+  return {status:'error',message:error instanceof Error?error.message:'Fallback GitHub preparation failed; no mode change was made.'};
+ }
 }
 
 async function autoRepairSourceServices():Promise<{status:'ready'|'queued'|'pending'|'error';message:string}>{
@@ -220,7 +233,7 @@ export default async function Settings(){
 
   <section className="section">
    <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">MAIN / FALLBACK sits directly above the authority board. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
-   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile} reconcileAction={autoRepairSourceServices}
+   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile} reconcileAction={autoRepairSourceServices} prepareFallbackAction={prepareFallbackConnections}
       missingRequirements={githubProfile==='primary'
        ? ['ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN'].filter(key=>!String(process.env[key]||'').trim() || /^(change-me|placeholder|replace-with)/i.test(String(process.env[key]||'').trim()))
        : ['ORBITFS_MAIN_VERCEL_TOKEN',...(!String(process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim()?['ORBITFS_PRIMARY_GITHUB_TOKEN or ORBITFS_RELEASE_DISPATCH_TOKEN']:[])].filter(key=>key.includes(' or ')||!String(process.env[key]||'').trim())}

@@ -44,3 +44,22 @@ test('owner-only self-heal and truthful incomplete routing status',()=>{
  assert.match(control,/Production service activation:/);
  assert.match(control,/The mode setting alone does not move public domains/);
 });
+
+test('owner can prepare standby Fallback while MAIN remains active, without deployment or mode switch',()=>{
+ const prepare=source.slice(source.indexOf('export async function prepareFallbackGithubProduction('),source.indexOf('async function latestReadyDeployment('));
+ assert.match(prepare,/select system_enabled,github_profile from system_settings/);
+ assert.match(prepare,/Boolean\(state\?\.system_enabled\)/);
+ assert.match(prepare,/String\(state\?\.github_profile\)!=='primary'/);
+ assert.match(prepare,/identity\.login/);
+ assert.match(prepare,/verifyVercelAccountProjects\('fallback'\)/);
+ assert.match(prepare,/syncSourceGitHubCredentials\('fallback'\)/);
+ assert.match(prepare,/deployments_triggered:false/);
+ assert.match(prepare,/source_mode_changed:false/);
+ assert.match(prepare,/database_changed:false/);
+ assert.doesNotMatch(prepare,/dispatchSourceProductionDeployments/);
+ assert.doesNotMatch(prepare,/update system_settings set github_profile/);
+ assert.match(ui,/user\.role!=='owner'/);
+ assert.match(ui,/prepareFallbackAction=\{prepareFallbackConnections\}/);
+ assert.match(control,/Prepare Fallback GitHub connections/);
+ assert.match(control,/disabled=\{!masterOffline\|\|preparing\}/);
+});

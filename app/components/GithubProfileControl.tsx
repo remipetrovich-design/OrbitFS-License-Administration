@@ -10,6 +10,7 @@ type Props={
  canManage:boolean;
  action:(previous:SourceSwitchResult,formData:FormData)=>Promise<SourceSwitchResult>;
  reconcileAction:()=>Promise<{status:'ready'|'queued'|'pending'|'error';message:string}>;
+ prepareFallbackAction:()=>Promise<{status:'success'|'error';message:string}>;
  missingRequirements?:string[];
 };
 
@@ -41,7 +42,7 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
-export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,missingRequirements=[]}:Props){
+export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,prepareFallbackAction,missingRequirements=[]}:Props){
  const [serviceStatus,setServiceStatus]=useState<{status:string;message:string}|null>(null);
  useEffect(()=>{
   if(!canManage)return;
@@ -52,6 +53,13 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
   return ()=>{canceled=true};
  },[canManage,profile,reconcileAction]);
  const [acknowledged,setAcknowledged]=useState(false);
+ const [preparing,setPreparing]=useState(false);
+ const [prepareResult,setPrepareResult]=useState<{status:'success'|'error';message:string}|null>(null);
+ const prepareStandby=()=>{
+  setPreparing(true);
+  setPrepareResult(null);
+  void prepareFallbackAction().then(result=>setPrepareResult(result)).catch(()=>setPrepareResult({status:'error',message:'Fallback preparation request failed. No source switch was performed.'})).finally(()=>setPreparing(false));
+ };
  const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
@@ -111,6 +119,18 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <span>{masterOffline?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Master Authority is ON — switching disabled'}</span>
      </div>
     </form>
+    {profile==='primary'&&canManage&&<div style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
+      <strong>Prepare Fallback before switching</strong>
+      <p>Uses existing Main License Manager credentials to update the <code>production</code> GitHub Actions <code>VERCEL_TOKEN</code> in the three Fallback service repositories.</p>
+      <button type="button" onClick={prepareStandby} disabled={!masterOffline||preparing}
+        style={{padding:'8px 12px',marginTop:8,borderRadius:7,border:'1px solid currentColor',fontWeight:600}}>
+        {preparing?'Preparing Fallback…':'Prepare Fallback GitHub connections'}
+      </button>
+      <p style={{marginTop:6}}>Requires Master Authority OFF. Does not switch modes, deploy applications, or change the shared database.</p>
+      {prepareResult&&<p role={prepareResult.status==='error'?'alert':'status'} style={{marginTop:8,fontWeight:600}}>
+        {prepareResult.status==='success'?'Prepared: ':'Not prepared: '}{prepareResult.message}
+      </p>}
+    </div>}
     <details className="mt-3">
      <summary style={{cursor:'pointer',fontSize:11}}>Show {targetLabel} GitHub source mapping</summary>
      <div className="github-mode-map">
