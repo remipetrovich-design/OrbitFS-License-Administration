@@ -67,6 +67,40 @@ export async function syncSourceGitHubCredentials(profile:SourceFamily){
  return updated;
 }
 
+/**
+ * Keep account-switch credentials available to the selected License Manager.
+ * The same authority database remains authoritative; no runtime licence,
+ * schema, release or customer-deployer settings are changed here.
+ *
+ * Only known, non-empty connection tokens are transported over HTTPS to the
+ * selected account's existing License Manager Vercel Production project.
+ */
+export async function syncLicenseManagerAccountConnections(profile:SourceFamily){
+ const {vercel,teamId}=credentials(profile);
+ const service=WORKFLOWS[profile].find(item=>item.repo.toLowerCase().includes('licen'));
+ if(!service)throw new Error('License Manager project mapping is not configured for selected source mode.');
+ const keys=['ORBITFS_MAIN_VERCEL_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN',
+  'ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'];
+ const changed:string[]=[];
+ for(const key of keys){
+  const value=String(process.env[key]||'').trim();
+  if(!value||/^(change-me|replace-with|placeholder|your-)/i.test(value))continue;
+  let response:Response;
+  try{
+   response=await fetch('https://api.vercel.com/v10/projects/'+encodeURIComponent(service.projectId)+
+    '/env?upsert=true&teamId='+encodeURIComponent(teamId),{
+     method:'POST',cache:'no-store',signal:AbortSignal.timeout(12000),
+     headers:{authorization:'Bearer '+vercel,'content-type':'application/json',accept:'application/json'},
+     body:JSON.stringify({key,value,type:'sensitive',target:['production']})
+   });
+  }catch{throw new Error('Could not reach '+profile+' Vercel when preparing License Manager connections.');}
+  if(!response.ok)throw new Error('Could not prepare License Manager '+key+' in '+profile+
+   ' Vercel Production (HTTP '+response.status+'). No secret values were logged.');
+  changed.push(key);
+ }
+ return changed;
+}
+
 async function latestReadyDeployment(service:Service,token:string,teamId:string){
  let response:Response;
  try{response=await fetch('https://api.vercel.com/v6/deployments?projectId='+encodeURIComponent(service.projectId)+
