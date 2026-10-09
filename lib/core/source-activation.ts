@@ -48,7 +48,6 @@ export async function syncSourceGitHubCredentials(profile:SourceFamily){
  const {github:githubToken,vercel}=credentials(profile);
  // Loaded only on the License Manager server. The trusted sodium implementation
  // seals the value to the GitHub environment's public key.
- // eslint-disable-next-line @typescript-eslint/no-require-imports
  const sodium=require('libsodium-wrappers');
  await sodium.ready;
  const updated:string[]=[];
