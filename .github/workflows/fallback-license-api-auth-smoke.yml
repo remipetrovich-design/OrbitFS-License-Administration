@@ -45,7 +45,7 @@ jobs:
           const statuses = [];
           for(const name of keys) {
             const token = String(process.env[name]||'');
-            const placeholder = /^(?:\\*+|\\[?redacted\\]?|\\[?sensitive\\]?|\\[?encrypted\\]?)$/i.test(token);
+            const placeholder = (token.length > 0 && Array.from(token).every(ch => ch === '*')) || ['[redacted]', 'redacted', 'sensitive', '[sensitive]', '[encrypted]', 'encrypted'].includes(token.toLowerCase());
             console.log(name+' available='+Boolean(token)+' length='+token.length+' placeholder='+placeholder);
             if(!token || placeholder)continue;
             const response = await fetch(base+'/release-channels', {headers:{authorization:'Bearer '+token}, cache:'no-store', signal:AbortSignal.timeout(15000)});
