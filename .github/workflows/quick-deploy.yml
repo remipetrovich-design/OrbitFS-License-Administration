@@ -24,6 +24,7 @@ jobs:
       VERCEL_CLI_VERSION: 59.23.1
 
     steps:
+      # On a source-family switch, the target service must be rebuilt in its own Vercel account.
       - name: Check active GitHub profile
         id: profile
         shell: bash
