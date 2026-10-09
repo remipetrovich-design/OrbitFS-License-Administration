@@ -8,6 +8,13 @@ function connectionString() {
 
   try {
     const url = new URL(raw);
+    // pg-connection-string can override Pool.ssl whenever libpq SSL URL options
+    // are present (especially sslmode=require). Keep the explicit SSL policy
+    // passed to Pool authoritative instead of accidentally enabling CA
+    // verification against Supabase's pooler certificate chain.
+    for (const key of ['sslmode', 'sslrootcert', 'sslcert', 'sslkey']) {
+      url.searchParams.delete(key);
+    }
     const directSupabase = url.hostname.startsWith('db.') && url.hostname.endsWith('.supabase.co');
     const supabasePooler = url.hostname.endsWith('.pooler.supabase.com');
 
@@ -31,6 +38,7 @@ function connectionString() {
       url.searchParams.set('pgbouncer', 'true');
       return url.toString();
     }
+    return url.toString();
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('SUPABASE_POOLER_HOST is required')) throw error;
     // Let pg report an invalid DATABASE_URL rather than hiding configuration errors.
