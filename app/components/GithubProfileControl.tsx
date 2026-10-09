@@ -1,5 +1,5 @@
 'use client';
-import {useActionState,useState} from 'react';
+import {useActionState,useEffect,useState} from 'react';
 import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
@@ -9,6 +9,7 @@ type Props={
  masterOffline:boolean;
  canManage:boolean;
  action:(previous:SourceSwitchResult,formData:FormData)=>Promise<SourceSwitchResult>;
+ reconcileAction:()=>Promise<{status:'ready'|'queued'|'pending'|'error';message:string}>;
  missingRequirements?:string[];
 };
 
@@ -40,7 +41,16 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
-export default function GithubProfileControl({profile,masterOffline,canManage,action,missingRequirements=[]}:Props){
+export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,missingRequirements=[]}:Props){
+ const [serviceStatus,setServiceStatus]=useState<{status:string;message:string}|null>(null);
+ useEffect(()=>{
+  if(!canManage)return;
+  let canceled=false;
+  void reconcileAction().then(result=>{if(!canceled)setServiceStatus(result)}).catch(()=>{
+   if(!canceled)setServiceStatus({status:'error',message:'Could not check service deployments.'});
+  });
+  return ()=>{canceled=true};
+ },[canManage,profile,reconcileAction]);
  const [acknowledged,setAcknowledged]=useState(false);
  const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
@@ -56,7 +66,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
    <div className="github-mode-inner">
     <div className="github-mode-heading"><div>
       <span>ORBITFS SOURCE AUTHORITY</span><h2>MAIN / FALLBACK</h2>
-      <p>License Manager selects the active GitHub and Vercel account family. This switch does not modify your shared database or start a deployment.</p>
+      <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged and automatically provisions GitHub/Vercel account credentials and queues the selected service deployments. Domain routing is checked separately.</p>
     </div><div className={`github-mode-status ${masterOffline?'ready':'blocked'}`}>
       <strong>{masterOffline?'MASTER OFF':'SWITCH LOCKED'}</strong>
       <small>{masterOffline?'Tick the checkbox to unlock the lever':'Turn Master Authority OFF first'}</small>
@@ -73,6 +83,11 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
         <span className="github-mode-lamp is-red" aria-hidden="true"/><strong>FALLBACK</strong><small>remipetrovich-design · Fallback Vercel</small>
        </div>
      </div>
+     {serviceStatus&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
+       <strong>Production service activation: {serviceStatus.status.toUpperCase()}</strong>
+       <p>{serviceStatus.message}</p>
+       {serviceStatus.status!=='ready'&&<small>The mode setting alone does not move public domains. Only a verified, working deployment can receive production routing.</small>}
+     </div>}
      {missingRequirements.length>0&&<div role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #e1a72e',borderRadius:8,background:'rgba(245,158,11,.10)',fontSize:12}}>
        <strong>{targetLabel} switch is not ready: missing Production connections.</strong>
        <p>Add these to the <strong>MAIN License Manager → Vercel → Production</strong> environment, then redeploy License Manager:</p>
@@ -88,7 +103,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
          onChange={event=>setAcknowledged(event.target.checked)} required/>
        <span><strong>I understand this switches production source authority to {targetLabel}.</strong>
         <small>Master Authority must be OFF. GitHub repositories and deployment workflows are checked before switching.
-        Both Vercel accounts keep their own projects; this action does not deploy or migrate a database.</small>
+        Both Vercel accounts keep their own projects; this action requests the target deployments but never migrates a database.</small>
        </span>
      </label>}
      <div className="github-mode-footer">

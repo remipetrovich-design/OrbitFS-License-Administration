@@ -1,5 +1,6 @@
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
+import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments} from './source-activation';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
 export type GithubProfileName='primary'|'fallback';
@@ -382,6 +383,9 @@ export async function setGithubProfile(
   const checked=await verifyGithubProfileTarget(next);
   const destinations=await verifyVercelWorkflowTargets(next);
   const projects=await verifyVercelAccountProjects(next);
+  // Before changing authoritative mode, securely install the correct Vercel
+  // account token into each selected GitHub Production environment.
+  const githubSecrets=await syncSourceGitHubCredentials(next);
   const pool=db();
   const client=await pool.connect();
   try{
@@ -399,12 +403,23 @@ export async function setGithubProfile(
         acknowledged:true,github_targets:checked,
         vercel_deployment_workflows:destinations,
         verified_vercel_projects:projects,
+        verified_github_production_credentials:githubSecrets,
         database_source:'lucaskerim123/Master-Database-System',
         database_changes:false,deployments_triggered:false,
       })],
     );
     await client.query('commit');
-    return updated;
+    // The mode is authoritative immediately; the target service workflows
+    // each gate on the fresh License Manager API and deploy to their own team.
+    // Deployment failures are reported, never mislabeled as a completed handoff.
+    try{
+      const queued=await dispatchSourceProductionDeployments(next);
+      return {...updated,sourceActivation:{queued,failed:[]}};
+    }catch(error){
+      return {...updated,sourceActivation:{
+        queued:[],failed:[error instanceof Error?error.message:'Could not queue Production service deployments.']
+      }};
+    }
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;

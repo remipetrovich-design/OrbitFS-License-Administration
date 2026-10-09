@@ -7,6 +7,7 @@ import PageHeader from '../components/PageHeader';
 import AuthorityControlGrid from '../components/AuthorityControlGrid';
 import GithubProfileControl from '../components/GithubProfileControl';
 import type {SourceSwitchResult} from '../components/GithubProfileControl';
+import {reconcileCurrentSourceServiceDeployments} from '../../lib/core/source-activation';
 
 export const dynamic='force-dynamic';
 
@@ -51,14 +52,33 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
   return {status:'error',message:'Invalid source mode. Refresh the page and try again.'};
  const acknowledged=formData.get('acknowledged')==='on';
  try{
-  await setGithubProfile(next,expected,acknowledged,user.id,user.email);
+  const switched=await setGithubProfile(next,expected,acknowledged,user.id,user.email);
+  if(switched.sourceActivation?.failed?.length)return {
+   status:'success',message:'Source mode changed, but service deployment dispatch failed: '+switched.sourceActivation.failed.join('; ')+
+    '. The active mode changed; production routing is NOT yet complete.'
+  };
  }catch(error){
   // Return a visible form error instead of throwing through Next.js server
   // actions, which produces an opaque production error digest.
   return {status:'error',message:error instanceof Error?error.message:'Source-mode check failed. No change was made.'};
  }
  revalidatePath('/settings');revalidatePath('/');
- return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+'. Reload the page to verify the selected account.'};
+ return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
+  '. The target service production builds were requested. Domain routing is not complete until all three are healthy.'};
+}
+
+async function autoRepairSourceServices():Promise<{status:'ready'|'queued'|'pending'|'error';message:string}>{
+ 'use server';
+ const user=await requireUser();
+ if(user.role!=='owner')return {status:'error',message:'Only the owner can reconcile Production service deployments.'};
+ try{
+  const result=await reconcileCurrentSourceServiceDeployments(user.id,user.email);
+  if(result.ready)return {status:'ready',message:'All three selected service projects have a ready Production deployment.'};
+  if('pending' in result&&result.pending)return {status:'pending',message:'Service deployment is already queued. Waiting for GitHub and Vercel.'};
+  return {status:'queued',message:'Started '+result.queued.length+' selected service deployments in the correct Vercel account.'};
+ }catch(error){
+  return {status:'error',message:error instanceof Error?error.message:'Service activation failed.'};
+ }
 }
 
 async function updatePolicy(formData:FormData){
@@ -200,7 +220,7 @@ export default async function Settings(){
 
   <section className="section">
    <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">MAIN / FALLBACK sits directly above the authority board. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
-   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile}
+   <GithubProfileControl profile={githubProfile} masterOffline={!masterEnabled} canManage={user.role==='owner'} action={switchGithubProfile} reconcileAction={autoRepairSourceServices}
       missingRequirements={githubProfile==='primary'
        ? ['ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN'].filter(key=>!String(process.env[key]||'').trim() || /^(change-me|placeholder|replace-with)/i.test(String(process.env[key]||'').trim()))
        : ['ORBITFS_MAIN_VERCEL_TOKEN',...(!String(process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim()?['ORBITFS_PRIMARY_GITHUB_TOKEN or ORBITFS_RELEASE_DISPATCH_TOKEN']:[])].filter(key=>key.includes(' or ')||!String(process.env[key]||'').trim())}
