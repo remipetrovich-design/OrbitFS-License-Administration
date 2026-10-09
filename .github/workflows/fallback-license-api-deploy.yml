@@ -1,0 +1,99 @@
+name: Deploy Fallback License Manager API
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fallback-license-api-deploy.yml
+permissions:
+  contents: read
+concurrency:
+  group: fallback-license-api-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.repository == 'remipetrovich-design/OrbitFS-License-Administration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_0fWVaLb24pyeeCRqqYu5G47K
+      VERCEL_PROJECT_ID: prj_rCooJWY8JMkBjekXLO8scT35UPJ8
+      VERCEL_SCOPE: splashincau-7868s-projects
+    steps:
+      - name: Checkout Fallback main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Confirm Fallback-only API routing and source
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          grep -q 'ORBITFS_FALLBACK_LICENSE_MASTER_URL' app/api/v1/api-connections/route.ts
+          test -n "$VERCEL_TOKEN"
+      - name: Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and typecheck
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Install pinned Vercel
+        run: npm install --global vercel@59.23.1
+      - name: Pull only Fallback production variables
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+      - name: Verify exact Fallback Vercel project
+        run: |
+          node - <<'NODE'
+          const p=require('./.vercel/project.json');
+          if(p.orgId!==process.env.VERCEL_ORG_ID || p.projectId!==process.env.VERCEL_PROJECT_ID){
+            throw new Error('Wrong Vercel project: deployment blocked');
+          }
+          NODE
+      - name: Build Fallback License Manager
+        run: vercel build --prod --yes --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE"
+      - name: Deploy Fallback License Manager API
+        run: |
+          set -euo pipefail
+          vercel deploy --prebuilt --archive=tgz --prod --yes \
+            --token="$VERCEL_TOKEN" --scope="$VERCEL_SCOPE" \
+            --meta "githubCommitSha=$GITHUB_SHA" \
+            --meta "githubCommitRef=main" \
+            --meta "githubOrg=remipetrovich-design" \
+            --meta "githubRepo=OrbitFS-License-Administration"
+      - name: Check Fallback API routing and security
+        run: |
+          set -euo pipefail
+          base="https://lm.incendiarynetworks.cc"
+          registry="$(curl --retry 5 --retry-delay 3 --retry-connrefused --fail-with-body -sS "$base/api/v1/api-connections?client=dev_panel&service=license_manager")"
+          REGISTRY_JSON="$registry" node - <<'NODE'
+          const r=JSON.parse(process.env.REGISTRY_JSON);
+          const urls=(r.connections||[]).map(x=>x.base_url);
+          if(!urls.includes('https://lm.incendiarynetworks.cc/api/v1') || urls.some(x=>x==='https://incendiarynetworks.cc/api/v1')){
+            throw new Error('Fallback registry contains wrong authority URL: '+JSON.stringify(urls));
+          }
+          console.log('Fallback API registry routing verified');
+          NODE
+          health="$(curl --fail-with-body -sS "$base/api/v1/license/health")"
+          HEALTH_JSON="$health" node - <<'NODE'
+          const h=JSON.parse(process.env.HEALTH_JSON);
+          if(h.ok!==true || h.external_authority_online!==true || !h.capabilities.license_validation || !h.capabilities.releases || !h.capabilities.deployment) {
+            throw new Error('Required Fallback authority API capability not enabled');
+          }
+          console.log('Fallback API capabilities verified');
+          NODE
+          source="$(curl --fail-with-body -sS "$base/api/v1/github-profile")"
+          SOURCE_JSON="$source" node - <<'NODE'
+          const s=JSON.parse(process.env.SOURCE_JSON);
+          if(s.profile!=='fallback') throw new Error('GitHub source mode mismatch');
+          console.log('Active source profile is fallback');
+          NODE
+          for route in releases license release-channels; do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' "$base/api/v1/$route")"
+            if [ "$status" != 401 ]; then echo "::error::$route must return 401 without a token, got $status"; exit 1; fi
+          done
+          echo 'Fallback API routing and read-only authorization checks passed'
