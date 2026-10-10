@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npm audit fix --package-lock-only --ignore-scripts --no-fund
+          npm audit fix --omit=dev --package-lock-only --ignore-scripts --no-fund
           npm ci
           npm audit --omit=dev --audit-level=high
           node - <<'NODE'
