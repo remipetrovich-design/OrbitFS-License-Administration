@@ -45,6 +45,7 @@ export async function POST(request:Request){
   const auth=await integrationAuthorized(request,'license.issue');
   if(!auth)return NextResponse.json({error:'UNAUTHORIZED',code:'UNAUTHORIZED'},{status:401});
   const body=await request.json().catch(()=>null);
+  if(!body||typeof body!=='object'||Array.isArray(body))return NextResponse.json({error:'Invalid request body',code:'INVALID_REQUEST'},{status:400});
   const productId=String(body?.product_id||'').trim();
   const productSlug=String(body?.product||body?.product_code||body?.productCode||'').trim().toLowerCase();
   if(!productId&&!productSlug)return NextResponse.json({error:'product is required',code:'PRODUCT_REQUIRED'},{status:400});
@@ -54,11 +55,19 @@ export async function POST(request:Request){
   if(!product)return NextResponse.json({error:'Product not found or disabled',code:'PRODUCT_NOT_FOUND'},{status:404});
   try{
     const customerExternalId=body?.customer_external_id??body?.customerRef??null;
-    const customerOverride=Boolean(body?.customer_override??body?.customerOverride) || String(customerExternalId||'').trim().toUpperCase()==='ADMIN';
+    // API clients must never self-assign an administrative/customer override.
+    if(body?.customer_override===true||body?.customerOverride===true||String(customerExternalId||'').trim().toUpperCase()==='ADMIN')
+      return NextResponse.json({error:'Customer override is not available through the issuance API',code:'CUSTOMER_OVERRIDE_FORBIDDEN'},{status:403});
+    const customerOverride=false;
+    if(typeof customerExternalId!=='string'||!customerExternalId.trim()||customerExternalId.length>200)
+      return NextResponse.json({error:'A valid customer_external_id is required',code:'CUSTOMER_REQUIRED'},{status:400});
+    const reference=body?.external_reference??body?.orderRef??null;
+    if(typeof reference!=='string'||!reference.trim()||reference.length>256)
+      return NextResponse.json({error:'A valid external_reference is required',code:'ORDER_REFERENCE_REQUIRED'},{status:400});
     const rawExpiry=body?.expires_at??body?.expiresAt??null;
     const expiresAt=rawExpiry?new Date(String(rawExpiry)):null;
     if(expiresAt&&Number.isNaN(expiresAt.getTime()))return NextResponse.json({error:'Invalid expiry date',code:'INVALID_EXPIRY'},{status:400});
-    const suppliedMetadata=body?.metadata&&typeof body.metadata==='object'?body.metadata:{};const components=body?.components&&typeof body.components==='object'?body.components:null;const existingPolicy=(suppliedMetadata as any).license_policy&&typeof (suppliedMetadata as any).license_policy==='object'?(suppliedMetadata as any).license_policy:{};const metadata={...suppliedMetadata,license_policy:{...existingPolicy,max_installations:1,...(components?{components}:{})}};const result=await issueLicense({productId:product.id,customerExternalId,customerOverride,externalReference:body?.external_reference??body?.orderRef??null,expiresAt,actor:`api:${auth.name}`,metadata});
+    const suppliedMetadata=body?.metadata&&typeof body.metadata==='object'?body.metadata:{};const components=body?.components&&typeof body.components==='object'?body.components:null;const existingPolicy=(suppliedMetadata as any).license_policy&&typeof (suppliedMetadata as any).license_policy==='object'?(suppliedMetadata as any).license_policy:{};const metadata={...suppliedMetadata,license_policy:{...existingPolicy,max_installations:1,...(components?{components}:{})}};const result=await issueLicense({productId:product.id,customerExternalId,customerOverride,externalReference:reference.trim(),expiresAt,actor:`api:${auth.name}`,metadata});
     const authorityRow=(await db().query('select status,metadata from licenses where id=$1 limit 1',[result.id])).rows[0]||{status:result.status,metadata};
     const activationStatuses=(await db().query('select status from activations where license_id=$1',[result.id])).rows.map((row:any)=>String(row.status||''));
     const effectiveStatus=canonicalLicenseStatus({storageStatus:authorityRow.status,metadata:authorityRow.metadata,activationStatuses});
