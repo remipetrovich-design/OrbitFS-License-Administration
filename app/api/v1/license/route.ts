@@ -64,6 +64,7 @@ export async function POST(request:Request){
     const reference=body?.external_reference??body?.orderRef??null;
     if(typeof reference!=='string'||!reference.trim()||reference.length>256)
       return NextResponse.json({error:'A valid external_reference is required',code:'ORDER_REFERENCE_REQUIRED'},{status:400});
+    if(body?.components!==undefined&&(typeof body.components!=='object'||body.components===null||Array.isArray(body.components)||Object.entries(body.components).some(([k,v])=>!['orbitfs_base','orbitfs_apex','orbitfs_mcp','orbitfs_studio'].includes(k)||typeof v!=='boolean')))return NextResponse.json({error:'Invalid component entitlement request',code:'INVALID_COMPONENTS'},{status:400});
     const rawExpiry=body?.expires_at??body?.expiresAt??null;
     const expiresAt=rawExpiry?new Date(String(rawExpiry)):null;
     if(expiresAt&&Number.isNaN(expiresAt.getTime()))return NextResponse.json({error:'Invalid expiry date',code:'INVALID_EXPIRY'},{status:400});
