@@ -46,7 +46,13 @@ export async function issueLicense(input: { productId: string; customerExternalI
   // staff/admin override rows are independent license sets and may coexist.
   if(input.customerExternalId&&!input.customerOverride){
     const existingCurrent=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,l.metadata,p.slug product from licenses l join products p on p.id=l.product_id where p.id=$1 and l.customer_external_id=$2 and l.customer_override=false and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[input.productId,String(input.customerExternalId)])).rows[0];
-    if(existingCurrent){await client.query('COMMIT');return {...existingCurrent,key:undefined,alreadyIssued:true};}
+    if(existingCurrent){
+      if(input.externalReference){
+        const used=(await client.query('select id,customer_external_id from licenses where external_reference=$1 order by created_at desc limit 1',[String(input.externalReference)])).rows[0];
+        if(used&&String(used.customer_external_id)!==String(input.customerExternalId))throw new Error('External reference belongs to another customer');
+      }
+      await client.query('COMMIT');return {...existingCurrent,key:undefined,alreadyIssued:true};
+    }
   }
   if(input.externalReference){
     const existing=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,p.slug product from licenses l join products p on p.id=l.product_id where l.external_reference=$1 and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[String(input.externalReference)])).rows[0];
@@ -59,7 +65,7 @@ export async function issueLicense(input: { productId: string; customerExternalI
   const suppliedMetadata=input.metadata&&typeof input.metadata==='object'?input.metadata:{};
   const suppliedPolicy=(suppliedMetadata as any).license_policy&&typeof (suppliedMetadata as any).license_policy==='object'?(suppliedMetadata as any).license_policy:{};
   const metadata={...suppliedMetadata,license_policy:{...suppliedPolicy,max_installations:1}};
-  const result=await client.query(`insert into licenses(license_key_hash,license_key_last4,product_id,customer_external_id,customer_override,external_reference,expires_at,metadata) values($1,$2,$3,$4,$5,$6,$7,$8) returning id,status,expires_at,customer_external_id,customer_override`,[hash,key.slice(-4),input.productId,input.customerExternalId??null,Boolean(input.customerOverride),input.externalReference??null,input.expiresAt??null,JSON.stringify(metadata)]);
+  const result=await client.query(`insert into licenses(license_key_hash,license_key_last4,product_id,customer_external_id,customer_override,external_reference,expires_at,metadata) values($1,$2,$3,$4,$5,$6,$7,$8) returning id,status,issued_at,expires_at,customer_external_id,customer_override`,[hash,key.slice(-4),input.productId,input.customerExternalId??null,Boolean(input.customerOverride),input.externalReference??null,input.expiresAt??null,JSON.stringify(metadata)]);
   const license=result.rows[0];
   await client.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'license.issue','license',$3,$4)`,[input.actorUserId??null,input.actor??'system',license.id,JSON.stringify({last4:key.slice(-4),product_id:input.productId,customer_external_id:input.customerExternalId??null,customer_override:Boolean(input.customerOverride)})]);
   await client.query('COMMIT');
@@ -74,8 +80,9 @@ export async function validateLicense(input:{key:string;productSlug:string;compo
   const runtime_policy={validation_ttl_seconds:Number(state?.validation_ttl_seconds||5400),offline_grace_seconds:Number(state?.offline_grace_seconds||0),pulse_poll_seconds:Number(state?.pulse_poll_seconds||5400),max_failed_validations:Number(state?.max_failed_validations||3),allow_offline_grace:Boolean(state?.allow_offline_grace),pulse_revision:Number(state?.pulse_revision||0),pulse_at:state?.pulse_at??null,pulse_reason:state?.pulse_reason??null,provider_outage_freeze_enabled:true,manual_authority_offline_uses_grace:true,freeze_grace_on_provider_failure:true,freeze_failure_counter_on_provider_failure:true,authority_reason};
   if(authority_reason)return{valid:false,code:'AUTHORITY_UNAVAILABLE' as const,status:503,runtime_policy,authority_reason,provider_outage:false,grace_action:'normal' as const,failure_counter_action:'normal' as const};
   const componentSlug=input.componentSlug||input.productSlug;
-  const productFamily=input.productSlug==='orbitfs'?'orbitfs':componentSlug.startsWith('orbitfs_')?'orbitfs':input.productSlug;
-  if(productFamily!=='orbitfs')return{valid:false,code:'LICENSE_NOT_FOUND' as const,status:404,runtime_policy};
+  const validProducts=new Set(['orbitfs','orbitfs_base','orbitfs_apex','orbitfs_mcp','orbitfs_studio']);
+  const validComponents=new Set(['orbitfs_base','orbitfs_apex','orbitfs_mcp','orbitfs_studio']);
+  if(!validProducts.has(input.productSlug)||!validComponents.has(componentSlug))return{valid:false,code:'LICENSE_NOT_FOUND' as const,status:404,runtime_policy};
   if(!input.installationId)return{valid:false,code:'INSTALLATION_ID_REQUIRED' as const,status:400,runtime_policy};
   const credentialHash=hashKey(input.key);
   let result=await pool.query(`select l.id,l.status,l.expires_at,l.metadata,p.slug component,p.status product_status,false as credential_scoped from licenses l join products p on p.id=l.product_id where l.license_key_hash=$1 and p.slug like 'orbitfs_%' limit 1`,[credentialHash]);
