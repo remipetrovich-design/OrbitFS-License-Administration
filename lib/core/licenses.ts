@@ -47,6 +47,7 @@ export async function issueLicense(input: { productId: string; customerExternalI
   if(input.customerExternalId&&!input.customerOverride){
     const existingCurrent=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,l.metadata,p.slug product from licenses l join products p on p.id=l.product_id where p.id=$1 and l.customer_external_id=$2 and l.customer_override=false and l.status not in ('revoked','expired') and (l.expires_at is null or l.expires_at>now()) order by l.created_at desc limit 1`,[input.productId,String(input.customerExternalId)])).rows[0];
     if(existingCurrent){
+      if(existingCurrent.status!=='active')throw new Error('Existing customer license is not active; issuance requires administrative resolution');
       if(input.externalReference){
         const used=(await client.query('select id,customer_external_id from licenses where external_reference=$1 order by created_at desc limit 1',[String(input.externalReference)])).rows[0];
         if(used&&String(used.customer_external_id)!==String(input.customerExternalId))throw new Error('External reference belongs to another customer');
@@ -57,6 +58,7 @@ export async function issueLicense(input: { productId: string; customerExternalI
   if(input.externalReference){
     const existing=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,p.slug product from licenses l join products p on p.id=l.product_id where l.external_reference=$1 and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[String(input.externalReference)])).rows[0];
     if(existing){
+      if(existing.status!=='active')throw new Error('Existing order reference points to an inactive license');
       if(input.customerExternalId&&String(existing.customer_external_id)!==String(input.customerExternalId))throw new Error('External reference belongs to another customer');
       await client.query('COMMIT');return {...existing,key:undefined,alreadyIssued:true};
     }
