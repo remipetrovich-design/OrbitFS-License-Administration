@@ -29,31 +29,43 @@ export function generateInstallationCredential(){return generateLicenseKey()}
 
 export async function issueLicense(input: { productId: string; customerExternalId?: string | null; customerOverride?: boolean; externalReference?: string | null; expiresAt?: Date | null; actorUserId?: string | null; actor?: string; metadata?: Record<string, unknown> }) {
   const pool=db();
-  const state=(await pool.query('select system_enabled,licensing_enabled,maintenance_mode from system_settings where id=true')).rows[0];
+  const client=await pool.connect();
+  try{
+  await client.query('BEGIN');
+  // Serialize check-and-create for a customer's Base license or an override reference.
+  const lockIdentity=input.customerExternalId&&!input.customerOverride?`customer:${input.productId}:${input.customerExternalId}`:input.externalReference?`reference:${input.externalReference}`:`unique:${crypto.randomUUID()}`;
+  await client.query('select pg_advisory_xact_lock(hashtext($1))',[lockIdentity]);
+  const state=(await client.query('select system_enabled,licensing_enabled,maintenance_mode from system_settings where id=true')).rows[0];
   if(!state?.system_enabled||!state.licensing_enabled||state.maintenance_mode) throw new Error('License authority is offline');
   // OrbitFS uses one Base licence per customer. APEX, MCP and Studio are
   // component entitlements on that Base licence, never standalone licence rows.
-  const productRow=(await pool.query('select slug from products where id=$1 limit 1',[input.productId])).rows[0];
+  const productRow=(await client.query('select slug from products where id=$1 limit 1',[input.productId])).rows[0];
   if(productRow && productRow.slug!=='orbitfs_base')throw new Error('OrbitFS add-ons are component entitlements on the Base license and cannot be issued as standalone licenses');
 
   // Normal customer issuance keeps one current license per product. Explicit
   // staff/admin override rows are independent license sets and may coexist.
   if(input.customerExternalId&&!input.customerOverride){
-    const existingCurrent=(await pool.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,l.metadata,p.slug product from licenses l join products p on p.id=l.product_id where p.id=$1 and l.customer_external_id=$2 and l.customer_override=false and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[input.productId,String(input.customerExternalId)])).rows[0];
-    if(existingCurrent)return {...existingCurrent,key:undefined,alreadyIssued:true};
+    const existingCurrent=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,l.metadata,p.slug product from licenses l join products p on p.id=l.product_id where p.id=$1 and l.customer_external_id=$2 and l.customer_override=false and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[input.productId,String(input.customerExternalId)])).rows[0];
+    if(existingCurrent){await client.query('COMMIT');return {...existingCurrent,key:undefined,alreadyIssued:true};}
   }
   if(input.externalReference){
-    const existing=(await pool.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,p.slug product from licenses l join products p on p.id=l.product_id where l.external_reference=$1 and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[String(input.externalReference)])).rows[0];
-    if(existing)return {...existing,key:undefined,alreadyIssued:true};
+    const existing=(await client.query(`select l.id,l.status,l.expires_at,l.license_key_last4,l.customer_external_id,l.customer_override,p.slug product from licenses l join products p on p.id=l.product_id where l.external_reference=$1 and l.status not in ('revoked','expired') order by l.created_at desc limit 1`,[String(input.externalReference)])).rows[0];
+    if(existing){
+      if(input.customerExternalId&&String(existing.customer_external_id)!==String(input.customerExternalId))throw new Error('External reference belongs to another customer');
+      await client.query('COMMIT');return {...existing,key:undefined,alreadyIssued:true};
+    }
   }
   const key=generateLicenseKey();const hash=hashKey(key);
   const suppliedMetadata=input.metadata&&typeof input.metadata==='object'?input.metadata:{};
   const suppliedPolicy=(suppliedMetadata as any).license_policy&&typeof (suppliedMetadata as any).license_policy==='object'?(suppliedMetadata as any).license_policy:{};
   const metadata={...suppliedMetadata,license_policy:{...suppliedPolicy,max_installations:1}};
-  const result=await pool.query(`insert into licenses(license_key_hash,license_key_last4,product_id,customer_external_id,customer_override,external_reference,expires_at,metadata) values($1,$2,$3,$4,$5,$6,$7,$8) returning id,status,expires_at,customer_external_id,customer_override`,[hash,key.slice(-4),input.productId,input.customerExternalId??null,Boolean(input.customerOverride),input.externalReference??null,input.expiresAt??null,JSON.stringify(metadata)]);
+  const result=await client.query(`insert into licenses(license_key_hash,license_key_last4,product_id,customer_external_id,customer_override,external_reference,expires_at,metadata) values($1,$2,$3,$4,$5,$6,$7,$8) returning id,status,expires_at,customer_external_id,customer_override`,[hash,key.slice(-4),input.productId,input.customerExternalId??null,Boolean(input.customerOverride),input.externalReference??null,input.expiresAt??null,JSON.stringify(metadata)]);
   const license=result.rows[0];
-  await pool.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'license.issue','license',$3,$4)`,[input.actorUserId??null,input.actor??'system',license.id,JSON.stringify({last4:key.slice(-4),product_id:input.productId,customer_external_id:input.customerExternalId??null,customer_override:Boolean(input.customerOverride)})]);
+  await client.query(`insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,$2,'license.issue','license',$3,$4)`,[input.actorUserId??null,input.actor??'system',license.id,JSON.stringify({last4:key.slice(-4),product_id:input.productId,customer_external_id:input.customerExternalId??null,customer_override:Boolean(input.customerOverride)})]);
+  await client.query('COMMIT');
   return {...license,key,alreadyIssued:false};
+  }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error}
+  finally{client.release()}
 }
 
 export async function validateLicense(input:{key:string;productSlug:string;componentSlug?:string;installationId?:string;productVersion?:string;metadata?:Record<string,unknown>;requestIp?:string|null;userAgent?:string|null;telemetry?:Record<string,unknown>;action?:string}){
