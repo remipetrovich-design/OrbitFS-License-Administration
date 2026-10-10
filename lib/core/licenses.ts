@@ -39,8 +39,9 @@ export async function issueLicense(input: { productId: string; customerExternalI
   if(!state?.system_enabled||!state.licensing_enabled||state.maintenance_mode) throw new Error('License authority is offline');
   // OrbitFS uses one Base licence per customer. APEX, MCP and Studio are
   // component entitlements on that Base licence, never standalone licence rows.
-  const productRow=(await client.query('select slug from products where id=$1 limit 1',[input.productId])).rows[0];
-  if(productRow && productRow.slug!=='orbitfs_base')throw new Error('OrbitFS add-ons are component entitlements on the Base license and cannot be issued as standalone licenses');
+  const productRow=(await client.query('select slug,status from products where id=$1 limit 1',[input.productId])).rows[0];
+  if(!productRow||productRow.status!=='active')throw new Error('Product is unavailable for licence issuance');
+  if(productRow.slug!=='orbitfs_base')throw new Error('OrbitFS add-ons are component entitlements on the Base license and cannot be issued as standalone licenses');
 
   // Normal customer issuance keeps one current license per product. Explicit
   // staff/admin override rows are independent license sets and may coexist.
