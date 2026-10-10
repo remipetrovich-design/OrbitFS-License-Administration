@@ -35,6 +35,12 @@ export async function POST(request: Request) {
   const component = String(body?.component ?? body?.component_code ?? product).trim().toLowerCase();
   const action = String(body?.action ?? 'validate').trim().toLowerCase();
 
+  if (!['validate','activate','check_in'].includes(action)) {
+    return NextResponse.json({valid:false,code:'INVALID_ACTION'},{status:400});
+  }
+  if (key.length>256 || product.length>80 || component.length>80 || installationId.length>256) {
+    return NextResponse.json({valid:false,code:'INVALID_REQUEST'},{status:400});
+  }
   if (!key || !product) {
     return NextResponse.json({ valid: false, code: 'INVALID_REQUEST' }, { status: 400 });
   }
