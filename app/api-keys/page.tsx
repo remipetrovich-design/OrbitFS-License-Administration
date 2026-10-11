@@ -2,7 +2,6 @@ import {requireUser} from '../../lib/session';
 import {listApiKeys,createApiKey,revokeApiKey,deleteRevokedApiKey,regenerateApiKey,ApiScope} from '../../lib/core/api-keys';
 import ApiKeyForm from './form';
 import RegenerateApiKey from './regenerate-control';
-import RegenerateApiKey from './regenerate';
 import SideNav from '../components/SideNav';
 import PageHeader from '../components/PageHeader';
 import TableTools from '../components/TableTools';
@@ -18,13 +17,6 @@ async function create(formData:FormData){
  if(!name||!selected.length)return;
  const result=await createApiKey({name,scopes:selected,actorUserId:u.id});
  return result.key;
-}
-async function regenerate(id:string){
- 'use server';
- const u=await requireUser();
- if(!['owner','admin'].includes(u.role))throw new Error('Owner or Admin access required.');
- if(!/^[0-9a-f-]{36}$/i.test(id))throw new Error('Invalid API key ID.');
- return regenerateApiKey(id,u.id);
 }
 async function regenerate(formData:FormData){
  'use server';
@@ -67,7 +59,7 @@ export default async function ApiKeys(){
       <td><div className="compact-scope-list">{(Array.isArray(k.scopes)?k.scopes:[]).map((scope:string)=><span className="badge" key={scope}>{scope}</span>)}</div></td>
       <td><span className={k.status==='active'?'state-pill online':'state-pill offline'}>{k.status}</span></td>
       <td>{k.last_used_at?new Date(k.last_used_at).toLocaleString():'Never'}</td>
-      <td>{canManage&&<div className="actions">{k.status==='active'&&<RegenerateApiKey id={k.id} name={k.name} action={regenerate}/>}{k.status==='active'&&<RegenerateApiKey id={k.id} name={k.name} action={regenerate}/>} {k.status==='active'&&<form action={revoke}><input type="hidden" name="id" value={k.id}/><button className="button danger">Revoke</button></form>}{k.status==='revoked'&&<form action={deleteRevoked}><input type="hidden" name="id" value={k.id}/><button className="button danger">Delete</button></form>}</div>}</td>
+      <td>{canManage&&<div className="actions">{k.status==='active'&&<RegenerateApiKey id={k.id} name={k.name} action={regenerate}/>} {k.status==='active'&&<form action={revoke}><input type="hidden" name="id" value={k.id}/><button className="button danger">Revoke</button></form>}{k.status==='revoked'&&<form action={deleteRevoked}><input type="hidden" name="id" value={k.id}/><button className="button danger">Delete</button></form>}</div>}</td>
      </tr>)}</tbody>
     </table></div>
    </div>
