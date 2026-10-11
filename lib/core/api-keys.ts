@@ -90,6 +90,38 @@ export async function authenticateApiKey(request: Request, requiredScope?: ApiSc
   return null;
 }
 
+/** Atomically rotate one existing managed key, retaining its name, id and scopes. */
+export async function regenerateApiKey(id: string, actorUserId: string) {
+  const client = await db().connect();
+  try {
+    await client.query('begin');
+    const existing = (await client.query(
+      'select id,name,key_last4,status,scopes from api_keys where id=$1 for update',
+      [id]
+    )).rows[0];
+    if (!existing || existing.status !== 'active') {
+      throw new Error('Only active API keys can be regenerated.');
+    }
+    const key = generateApiKey();
+    const updated = (await client.query(
+      'update api_keys set key_hash=$2,key_last4=$3,last_used_at=null where id=$1 and status=\'active\' returning id,name,key_last4',
+      [id, hashKey(key), key.slice(-4)]
+    )).rows[0];
+    if (!updated) throw new Error('API key regeneration failed.');
+    await client.query(
+      "insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details) values($1,'admin','api_key.regenerate','api_key',$2,$3)",
+      [actorUserId, id, JSON.stringify({name:existing.name,previous_last4:existing.key_last4,new_last4:updated.key_last4,scopes_unchanged:true})]
+    );
+    await client.query('commit');
+    return {key, id:updated.id, name:updated.name, last4:updated.key_last4};
+  } catch (error) {
+    await client.query('rollback').catch(()=>undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function revokeApiKey(id: string, actorUserId: string) {
   const result = await db().query(`update api_keys set status='revoked',revoked_at=now(),revoked_by=$2 where id=$1 and status='active' returning id`, [id, actorUserId]);
   return Boolean(result.rowCount);
