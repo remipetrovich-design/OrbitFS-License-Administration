@@ -34,6 +34,7 @@ export async function GET(){
    protocol:1,mode,revision:Number(settings?.pulse_revision||0),
    switchedAt:settings?.updated_at??null,
    authorityOnline:Boolean(settings?.system_enabled),
+   handoverMode:Boolean(settings?.maintenance_mode),
    active:TARGETS[mode],
    shared:{database:true,aiRepair:true},
   },{headers:{'cache-control':'no-store'}});
