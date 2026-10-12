@@ -11,7 +11,7 @@ const WORKFLOWS:Record<SourceFamily,Service[]>={
  ],
  fallback:[
   {repo:'remipetrovich-design/OrbitFS-License-Administration',workflow:'quick-deploy.yml',projectId:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8',healthUrl:'https://lm.incendiarynetworks.cc/api/v1/license/health'},
-  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',healthUrl:'https://orbitfs-dev-panel-fallback.vercel.app'},
+  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',healthUrl:'https://dev1.incendiarynetworks.cc'},
   {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',workflow:'quick-redesign-deploy.yml',projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq',healthUrl:'https://orbitfs-billing-fallback.vercel.app'},
  ]
 };
