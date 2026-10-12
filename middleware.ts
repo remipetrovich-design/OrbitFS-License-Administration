@@ -5,7 +5,6 @@ import type { NextRequest } from 'next/server';
 // exactly one active family. Standby is NOT a second public operational API.
 const DEPLOYED_FAMILY = 'fallback';
 const API_HOST = 'lm.incendiarynetworks.cc';
-const PANEL_HOST = 'lm.incendiarynetworks.cc';
 const DISCOVERY = '/api/v1/source-configuration';
 
 export async function middleware(request: NextRequest) {
@@ -64,7 +63,7 @@ export async function middleware(request: NextRequest) {
       url.pathname = '/api/v1/license/health';
       return NextResponse.rewrite(url);
     }
-    if (!pathname.startsWith('/api/') && host !== PANEL_HOST) {
+    if (!pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'API_HOST_ONLY', service: 'license-manager-api' }, { status: 404 });
     }
   }
