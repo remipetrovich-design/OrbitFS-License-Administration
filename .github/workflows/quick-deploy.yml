@@ -211,6 +211,20 @@ jobs:
           echo "Commit: $GITHUB_SHA"
           echo "Deployment: ${{ steps.production_state.outputs.deployment_url }}"
 
+      - name: Recheck active profile immediately before production deployment
+        if: steps.profile.outputs.deploy == 'true'
+        shell: bash
+        env:
+          EXPECTED_GITHUB_PROFILE: fallback
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --retry 2 --retry-delay 2 --max-time 15 https://incendiarynetworks.cc/api/v1/github-profile)"
+          active="$(node -e 'const value=JSON.parse(process.argv[1]);process.stdout.write(String(value.profile||""))' "$response")"
+          if [ "$active" != "$EXPECTED_GITHUB_PROFILE" ]; then
+            echo "::error::Production deployment blocked: active profile is $active, repository requires $EXPECTED_GITHUB_PROFILE."
+            exit 1
+          fi
+
       - name: Deploy quick artifact to production
         if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes == 'true') }}
         id: deploy
