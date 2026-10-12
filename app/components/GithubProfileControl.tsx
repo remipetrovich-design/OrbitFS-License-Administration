@@ -58,14 +58,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
   const interval=setInterval(()=>{void refresh()},10000);
   return ()=>{canceled=true;clearInterval(interval)};
  },[canManage,profile]);
- useEffect(()=>{
-  if(!canManage)return;
-  let canceled=false;
-  void reconcileAction().then(result=>{if(!canceled)setServiceStatus(result)}).catch(()=>{
-   if(!canceled)setServiceStatus({status:'error',message:'Could not check service deployments.'});
-  });
-  return ()=>{canceled=true};
- },[canManage,profile,reconcileAction]);
+
  const [acknowledged,setAcknowledged]=useState(false);
  const [preparing,setPreparing]=useState(false);
  const [prepareResult,setPrepareResult]=useState<{status:'success'|'error';message:string}|null>(null);
