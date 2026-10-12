@@ -6,11 +6,5 @@
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- app components lib public scripts package.json package-lock.json next.config.* tsconfig.json vercel.json",
   "git": {
     "deploymentEnabled": false
-  },
-  "crons": [
-    {
-      "path": "/api/cron/source-handover",
-      "schedule": "0 3 * * *"
-    }
-  ]
+  }
 }
