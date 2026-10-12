@@ -346,8 +346,12 @@ async function verifyVercelWorkflowTargets(profile:GithubProfileName){
     throw new Error('Wrong Vercel target in '+target.repo+' workflow '+target.file+
       '. Correct its account/project configuration before switching.');
    }
-   if(!yaml.includes('EXPECTED_GITHUB_PROFILE: '+profile)||
-      !yaml.includes('secrets.VERCEL_TOKEN')){
+   const manualLicenseWorkflow=target.repo.endsWith('/Custom-licence-manager')||
+      target.repo.endsWith('/OrbitFS-License-Administration');
+   const expectedGuard=manualLicenseWorkflow
+      ?yaml.includes('Authorize manual standby deployment')&&yaml.includes('workflow_dispatch')
+      :yaml.includes('EXPECTED_GITHUB_PROFILE: '+profile)&&yaml.includes('workflow_dispatch');
+   if(!expectedGuard||!yaml.includes('secrets.VERCEL_TOKEN')){
     throw new Error('Source profile or production Vercel token check is missing in '+target.repo);
    }
    valid=true;break;
