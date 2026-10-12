@@ -1,6 +1,6 @@
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
-import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections} from './source-activation';
+import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
 export type GithubProfileName='primary'|'fallback';
@@ -387,6 +387,24 @@ export async function setGithubProfile(
   // account token into each selected GitHub Production environment.
   const vercelLicenseCredentials=await syncLicenseManagerAccountConnections(next);
   const githubSecrets=await syncSourceGitHubCredentials(next);
+  // Stage the destination while keeping the old family authoritative. A
+  // deployment dispatch is not proof of readiness and must never flip mode.
+  const destination=await inspectSourceDeployments(next);
+  if(!destination.allReady){
+    const absent=destination.services.filter(service=>!service.ready).map(service=>service.repo);
+    const recent=(await db().query(
+      "select 1 from audit_events where action='github_profile.handover_preparing' and details->>'from'=$1 and details->>'to'=$2 and created_at>now()-interval '10 minutes' limit 1",
+      [expected,next]
+    )).rowCount;
+    if(recent)throw new Error('Destination services are being prepared: '+absent.join(', ')+'. Waiting for previously queued deployments. Current mode remains active.');
+    const queued=await dispatchSourceProductionDeployments(next,absent);
+    await db().query(
+      `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+       values($1,$2,'github_profile.handover_preparing','system_settings','github_profile',$3)`,
+      [actorUserId,actor,JSON.stringify({from:expected,to:next,queued,ready:destination.services,database_changed:false})],
+    );
+    throw new Error('Destination services are being prepared: '+queued.join(', ')+'. Current mode remains active. Verify readiness and move the lever again to complete handover.');
+  }
   const pool=db();
   const client=await pool.connect();
   try{
@@ -395,7 +413,19 @@ export async function setGithubProfile(
     const actual=String(current?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
     if(Boolean(current?.system_enabled))throw new Error('Master Authority must be OFF before changing MAIN/FALLBACK mode');
     if(actual!==expected)throw new Error('Source mode changed since this page was loaded. Refresh before switching.');
-    const updated=(await client.query('update system_settings set github_profile=$1,updated_at=now() where id=true returning *',[next])).rows[0];
+    // Publish the mode and pulse revision in the same transaction. This avoids
+    // a selected mode becoming visible without a durable refresh directive.
+    const updated=(await client.query(
+      `update system_settings set github_profile=$1,
+       pulse_revision=coalesce(pulse_revision,0)+1,
+       pulse_at=now(),pulse_reason='source-mode-changed',updated_at=now()
+       where id=true returning *`,[next]
+    )).rows[0];
+    await client.query(
+      `insert into license_pulses(revision,action,scope,reason,payload,requires_ack,created_by_user_id,created_by)
+       values($1,'refresh_authority','global','source-mode-changed',$2,true,$3,$4)`,
+      [updated.pulse_revision,JSON.stringify({source:'github-profile-switch',from:actual,to:next,mode:next==='primary'?'main':'fallback'}),actorUserId,actor]
+    );
     await client.query(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
        values($1,$2,'github_profile.changed','system_settings','github_profile',$3)`,
@@ -411,23 +441,38 @@ export async function setGithubProfile(
       })],
     );
     await client.query('commit');
-    // The mode is authoritative immediately; the target service workflows
-    // each gate on the fresh License Manager API and deploy to their own team.
-    // Deployment failures are reported, never mislabeled as a completed handoff.
-    try{
-      const queued=await dispatchSourceProductionDeployments(next);
-      return {...updated,sourceActivation:{queued,failed:[]}};
-    }catch(error){
-      return {...updated,sourceActivation:{
-        queued:[],failed:[error instanceof Error?error.message:'Could not queue Production service deployments.']
-      }};
-    }
+    return {...updated,sourceActivation:{queued:[],failed:[],pulseRevision:Number(updated.pulse_revision)}};
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;
   }finally{
     client.release();
   }
+}
+
+export async function getSourceHandoverStatus(){
+ const settings=await getSettings();
+ const mode=settings?.github_profile==='fallback'?'fallback':'main';
+ const result=(await db().query(
+  `select id,revision,created_at,payload from license_pulses
+   where action='refresh_authority' and reason='source-mode-changed'
+   order by revision desc limit 1`
+ )).rows[0];
+ if(!result)return {mode,stage:'no_handover',revision:null,received:0,applied:0,failed:0};
+ const receipts=(await db().query(
+  `select status,count(*)::int as count from license_pulse_receipts
+   where pulse_id=$1 group by status`,[result.id]
+ )).rows;
+ const counts=Object.fromEntries(receipts.map((row:any)=>[String(row.status),Number(row.count)]));
+ const applied=counts.applied||0,failed=counts.failed||0,received=counts.received||0;
+ return {
+  mode,revision:Number(result.revision),startedAt:result.created_at,
+  stage:failed?'runtime_failed':applied?'runtime_acknowledged':'awaiting_runtime_ack',
+  received,applied,failed,
+  // This is observable receipt state, not proof of both Base and Engine
+  // changing API provider or evidence that old services may be disabled.
+  confirmed:false
+ };
 }
 
 export async function updateRuntimePolicy(input:Partial<RuntimePolicy>,actorUserId:string|null,actor:string){
