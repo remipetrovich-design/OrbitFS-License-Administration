@@ -83,6 +83,14 @@ export default function ReleaseQueueActions({
         </form>
       )}
 
+      {published && !archived && (
+        <form action={action} onSubmit={(e) => { if (!confirm(releaseType === 'base' ? 'Withdraw this published Base deployment? Existing deployments are not automatically rolled back.' : 'Withdraw this published update from delivery? Existing installations are not automatically rolled back.')) e.preventDefault(); }}>
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="action" value="withdraw" />
+          <button className="button danger" disabled={pending}>{releaseType === 'base' ? 'Withdraw deployment' : 'Withdraw update'}</button>
+        </form>
+      )}
+
       {!archived && <form action={action}><input type="hidden" name="id" value={id} /><input type="hidden" name="action" value="archive" /><button className="button secondary" disabled={pending}>Archive</button></form>}
 
       {state.message && (
