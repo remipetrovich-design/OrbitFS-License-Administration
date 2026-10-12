@@ -84,6 +84,7 @@ jobs:
             throw new Error('Quick Deploy policy violation: automatic Vercel Git deployments must remain disabled');
           }
           NODE
+          node scripts/check-vercel-hobby-crons.mjs
 
       - name: Use Node 22
         if: steps.profile.outputs.deploy == 'true'
