@@ -5,14 +5,14 @@ import {configuredVercelFamily,verifyVercelAccountProjects} from './source-verce
 type Service = {repo:string;workflow:string;projectId:string;healthUrl:string};
 const WORKFLOWS:Record<SourceFamily,Service[]>={
  primary:[
-  {repo:'lucaskerim123/Custom-licence-manager',workflow:'quick-deploy.yml',projectId:'prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv',healthUrl:'https://incendiarynetworks.cc/api/v1/license/health'},
-  {repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml',projectId:'prj_o5ju4zFGSDZelX4SA7GAu3rQqtap',healthUrl:'https://dev.incendiarynetworks.cc'},
-  {repo:'lucaskerim123/V2_Billing_Store',workflow:'quick-redesign-deploy.yml',projectId:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd',healthUrl:'https://orbitfsstore.vercel.app'},
+  {repo:'lucaskerim123/Custom-licence-manager',workflow:'quick-deploy.yml',projectId:'prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv',healthUrl:'https://incendiarynetworks.cc/api/v1/source-configuration'},
+  {repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml',projectId:'prj_o5ju4zFGSDZelX4SA7GAu3rQqtap',healthUrl:'https://dev.incendiarynetworks.cc/_handover_health'},
+  {repo:'lucaskerim123/V2_Billing_Store',workflow:'quick-redesign-deploy.yml',projectId:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd',healthUrl:'https://orbitfsstore.vercel.app/api/handover-health'},
  ],
  fallback:[
-  {repo:'remipetrovich-design/OrbitFS-License-Administration',workflow:'quick-deploy.yml',projectId:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8',healthUrl:'https://lm.incendiarynetworks.cc/api/v1/license/health'},
-  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',healthUrl:'https://dev1.incendiarynetworks.cc'},
-  {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',workflow:'quick-redesign-deploy.yml',projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq',healthUrl:'https://orbitfs-billing-fallback.vercel.app'},
+  {repo:'remipetrovich-design/OrbitFS-License-Administration',workflow:'quick-deploy.yml',projectId:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8',healthUrl:'https://lm.incendiarynetworks.cc/api/v1/source-configuration'},
+  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',healthUrl:'https://dev1.incendiarynetworks.cc/_handover_health'},
+  {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',workflow:'quick-redesign-deploy.yml',projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq',healthUrl:'https://orbitfs-billing-fallback.vercel.app/api/handover-health'},
  ]
 };
 
