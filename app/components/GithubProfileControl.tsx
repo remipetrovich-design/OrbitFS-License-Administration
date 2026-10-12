@@ -6,7 +6,8 @@ type GithubProfile='primary'|'fallback';
 export type SourceSwitchResult={status:'idle'|'error'|'preparing'|'success';message:string};
 type Props={
  profile:GithubProfile;
- masterOffline:boolean;
+ handoverReady:boolean;
+ allowPreparation:boolean;
  canManage:boolean;
  action:(previous:SourceSwitchResult,formData:FormData)=>Promise<SourceSwitchResult>;
  reconcileAction:()=>Promise<{status:'ready'|'queued'|'pending'|'error';message:string}>;
@@ -42,7 +43,7 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
-export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,prepareFallbackAction,missingRequirements=[]}:Props){
+export default function GithubProfileControl({profile,handoverReady,allowPreparation,canManage,action,reconcileAction,prepareFallbackAction,missingRequirements=[]}:Props){
  const [serviceStatus,setServiceStatus]=useState<{status:string;message:string}|null>(null);
  const [handover,setHandover]=useState<{mode:string;stage:string;revision:number|null;received:number;applied:number;failed:number;deployments?:{allReady:boolean}}|null>(null);
  const [refreshing,setRefreshing]=useState(false);
@@ -71,7 +72,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
- const canSwitch=canManage&&masterOffline&&acknowledged&&!isPending&&missingRequirements.length===0;
+ const canSwitch=canManage&&handoverReady&&acknowledged&&!isPending&&missingRequirements.length===0;
 
  return <section className="github-mode-panel" aria-label="Main and fallback source mode">
    <span className="authority-hardware-screw screw-tl" aria-hidden="true"/>
@@ -82,9 +83,9 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
     <div className="github-mode-heading"><div>
       <span>ORBITFS SOURCE AUTHORITY</span><h2>MAIN / FALLBACK</h2>
       <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged and automatically provisions GitHub/Vercel account credentials and queues the selected service deployments. Domain routing is checked separately.</p>
-    </div><div className={`github-mode-status ${masterOffline?'ready':'blocked'}`}>
-      <strong>{masterOffline?'HANDOVER READY':'SWITCH LOCKED'}</strong>
-      <small>{masterOffline?'Tick the checkbox to unlock the lever':'Enable Maintenance / Handover Mode or turn Master OFF'}</small>
+    </div><div className={`github-mode-status ${handoverReady?'ready':'blocked'}`}>
+      <strong>{handoverReady?'HANDOVER READY':'SWITCH LOCKED'}</strong>
+      <small>{handoverReady?'Tick the checkbox to unlock the lever':'Turn Master ON and enable Maintenance / Handover Mode'}</small>
     </div></div>
     <form action={formAction}>
      <input type="hidden" name="profile" value={target}/>
@@ -131,26 +132,26 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
      </p>}
      {result.status==='success'&&<p role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #3b9d72',borderRadius:8,fontSize:12}}>{result.message}</p>}
      {canManage&&<label className="github-mode-confirm-check">
-       <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!masterOffline}
+       <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!handoverReady}
          onChange={event=>setAcknowledged(event.target.checked)} required/>
        <span><strong>I understand this switches production source authority to {targetLabel}.</strong>
-        <small>Maintenance / Handover Mode or Master OFF is required. GitHub repositories and deployment workflows are checked before switching.
+        <small>Master ON with Maintenance / Handover Mode is required. GitHub repositories and deployment workflows are checked before switching.
         Both Vercel accounts keep their own projects; this action requests the target deployments but never migrates a database.</small>
        </span>
      </label>}
      <div className="github-mode-footer">
       <strong>ACTIVE: {activeLabel}</strong>
-      <span>{masterOffline?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Enable Maintenance / Handover Mode to unlock the switch'}</span>
+      <span>{handoverReady?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Enable Maintenance / Handover Mode to unlock the switch'}</span>
      </div>
     </form>
     {profile==='primary'&&canManage&&<div style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
       <strong>Prepare Fallback before switching</strong>
       <p>Uses existing Main License Manager credentials to update the <code>production</code> GitHub Actions <code>VERCEL_TOKEN</code> in the three Fallback service repositories.</p>
-      <button type="button" onClick={prepareStandby} disabled={!masterOffline||preparing}
+      <button type="button" onClick={prepareStandby} disabled={!allowPreparation||preparing}
         style={{padding:'8px 12px',marginTop:8,borderRadius:7,border:'1px solid currentColor',fontWeight:600}}>
         {preparing?'Preparing Fallback…':'Prepare Fallback GitHub connections'}
       </button>
-      <p style={{marginTop:6}}>Requires Maintenance / Handover Mode or Master OFF. Does not switch modes, deploy applications, or change the shared database.</p>
+      <p style={{marginTop:6}}>Switching requires Master ON plus Maintenance / Handover Mode. Fallback preparation also works with Master OFF. Does not switch modes, deploy applications, or change the shared database.</p>
       {prepareResult&&<p role={prepareResult.status==='error'?'alert':'status'} style={{marginTop:8,fontWeight:600}}>
         {prepareResult.status==='success'?'Prepared: ':'Not prepared: '}{prepareResult.message}
       </p>}
