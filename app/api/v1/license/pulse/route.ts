@@ -15,6 +15,8 @@ function publicState(s:any){
       max_failed_validations:Number(s?.max_failed_validations||3),
       allow_offline_grace:Boolean(s?.allow_offline_grace),
     },
+    source_mode:s?.github_profile==='fallback'?'fallback':'main',
+    source_profile:s?.github_profile==='fallback'?'fallback':'primary',
     authority:{
       system_enabled:Boolean(s?.system_enabled),
       licensing_enabled:Boolean(s?.licensing_enabled),
