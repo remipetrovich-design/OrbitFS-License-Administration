@@ -1,5 +1,5 @@
 'use client';
-import {useActionState,useEffect,useRef,useState} from 'react';
+import {useActionState,useState} from 'react';
 import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
@@ -44,20 +44,20 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
 
 export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,prepareFallbackAction,missingRequirements=[]}:Props){
  const [serviceStatus,setServiceStatus]=useState<{status:string;message:string}|null>(null);
- const [handover,setHandover]=useState<{mode:string;stage:string;revision:number|null;received:number;applied:number;failed:number}|null>(null);
- useEffect(()=>{
-  if(!canManage)return;
-  let canceled=false;
-  const refresh=async()=>{
-   try{
-    const response=await fetch('/api/v1/source-handover',{cache:'no-store'});
-    if(response.ok&&!canceled)setHandover(await response.json());
-   }catch{}
-  };
-  void refresh();
-  const interval=setInterval(()=>{void refresh()},10000);
-  return ()=>{canceled=true;clearInterval(interval)};
- },[canManage,profile]);
+ const [handover,setHandover]=useState<{mode:string;stage:string;revision:number|null;received:number;applied:number;failed:number;deployments?:{allReady:boolean}}|null>(null);
+ const [refreshing,setRefreshing]=useState(false);
+ const [refreshError,setRefreshError]=useState('');
+ const refreshStatus=async()=>{
+  if(refreshing)return;
+  setRefreshing(true);setRefreshError('');
+  try{
+   const response=await fetch('/api/v1/source-handover',{cache:'no-store'});
+   if(!response.ok)throw new Error('Status request returned '+response.status);
+   setHandover(await response.json());
+  }catch(error){
+   setRefreshError(error instanceof Error?error.message:'Status refresh failed');
+  }finally{setRefreshing(false)}
+ };
 
  const [acknowledged,setAcknowledged]=useState(false);
  const [preparing,setPreparing]=useState(false);
@@ -68,12 +68,6 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
   void prepareFallbackAction().then(result=>setPrepareResult(result)).catch(()=>setPrepareResult({status:'error',message:'Fallback preparation request failed. No source switch was performed.'})).finally(()=>setPreparing(false));
  };
  const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
- const switchForm=useRef<HTMLFormElement>(null);
- useEffect(()=>{
-  if(result.status!=='preparing'||!masterOffline||!canManage)return;
-  const timer=setTimeout(()=>switchForm.current?.requestSubmit(),20000);
-  return ()=>clearTimeout(timer);
- },[result,masterOffline,canManage]);
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
@@ -92,7 +86,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <strong>{masterOffline?'MASTER OFF':'SWITCH LOCKED'}</strong>
       <small>{masterOffline?'Tick the checkbox to unlock the lever':'Turn Master Authority OFF first'}</small>
     </div></div>
-    <form action={formAction} ref={switchForm}>
+    <form action={formAction}>
      <input type="hidden" name="profile" value={target}/>
      <input type="hidden" name="expected_profile" value={profile}/>
      <div className="github-mode-console">
@@ -104,6 +98,15 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
         <span className="github-mode-lamp is-red" aria-hidden="true"/><strong>FALLBACK</strong><small>remipetrovich-design · Fallback Vercel</small>
        </div>
      </div>
+     {canManage&&<div style={{margin:'10px 0',fontSize:12}}>
+       <button type="button" onClick={refreshStatus} disabled={refreshing}
+        style={{padding:'8px 12px',borderRadius:7,border:'1px solid currentColor'}}>
+        {refreshing?'Checking services…':'Refresh Status'}
+       </button>
+       <small style={{marginLeft:8}}>Checks only when pressed. No scheduled background checks.</small>
+       {refreshError&&<p role="alert">{refreshError}</p>}
+     </div>}
+     {handover&&<p role="status" style={{fontSize:12}}>Service readiness: {handover.deployments?.allReady?'READY':'NOT VERIFIED / NOT READY'}</p>}
      {handover&&handover.revision!==null&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
        <strong>Handover revision #{handover.revision}: {handover.stage.replaceAll('_',' ')}</strong>
        <p>Runtime receipts: {handover.applied} applied · {handover.received} received · {handover.failed} failed.</p>
@@ -121,7 +124,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
        <p>These are server-side preflight credentials. They can use your existing account tokens; the two GitHub/Vercel families must remain separate.</p>
      </div>}
      {result.status==='preparing'&&<p role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
-       <strong>Preparing {targetLabel}.</strong> {result.message} The lever will automatically retry while this page is open.
+       <strong>Preparing {targetLabel}.</strong> {result.message} Use the lever again once the destination deployments are ready.
      </p>}
      {result.status==='error'&&<p role="alert" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #dc5555',borderRadius:8,background:'rgba(239,68,68,.12)',fontSize:12}}>
        <strong>Switch not completed.</strong> {result.message} The active mode was not changed by this failed request.
