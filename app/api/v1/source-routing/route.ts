@@ -11,7 +11,7 @@ const PRIMARY_DESTINATIONS={
   billing:{projectId:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd',url:'https://orbitfsstore.vercel.app'},
 } as const;
 const FALLBACK_DESTINATIONS={
-  panel:{projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',url:'https://orbitfs-dev-panel-fallback.vercel.app'},
+  panel:{projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',url:'https://dev1.incendiarynetworks.cc'},
   billing:{projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq',url:'https://orbitfs-billing-fallback.vercel.app'},
 } as const;
 
@@ -65,8 +65,8 @@ function familyReadiness(profile:'primary'|'fallback'){
     isReady(destinations.billing.projectId,token,family.teamId),
   ]).then(async([panel,billing])=>{
     const [panelLive,billingLive]=await Promise.all([
-      panel?reachableProductionPage(destinations.panel.url):Promise.resolve(false),
-      billing?reachableProductionPage(destinations.billing.url):Promise.resolve(false),
+      panel?reachableProductionPage(destinations.panel.url+'/_handover_health'):Promise.resolve(false),
+      billing?reachableProductionPage(destinations.billing.url+'/api/handover-health'):Promise.resolve(false),
     ]);
     return {panel:panel&&panelLive,billing:billing&&billingLive};
   });
