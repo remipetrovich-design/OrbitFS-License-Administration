@@ -216,7 +216,7 @@ export default async function Settings(){
  const effectiveEnabled=(field:string,configured:boolean)=>{
   if(field==='system_enabled')return configured;
   if(!masterEnabled)return false;
-  if((field==='licensing_enabled'||field==='customer_self_unlock_enabled')&&maintenance)return false;
+  if(field!=='maintenance_mode'&&maintenance)return false;
   if(['base_deployment_enabled','update_deployment_enabled','rollback_enabled'].includes(field)&&!deploymentEnabled)return false;
   return configured;
  };
