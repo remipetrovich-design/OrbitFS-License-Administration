@@ -124,7 +124,7 @@ export default function AuthorityControlGrid({rows,canManage,action}:{rows:Autho
   const value=Boolean(configured[field]);
   if(field==='system_enabled')return value;
   if(!masterOn)return false;
-  if((field==='licensing_enabled'||field==='customer_self_unlock_enabled')&&maintenanceOn)return false;
+  if(field!=='maintenance_mode'&&maintenanceOn)return false;
   if(DEPLOYMENT_FIELDS.includes(field as (typeof DEPLOYMENT_FIELDS)[number])&&!deploymentOn)return false;
   return value;
  };
@@ -132,8 +132,8 @@ export default function AuthorityControlGrid({rows,canManage,action}:{rows:Autho
  const lockFor=(field:string):LockState=>{
   if(field==='system_enabled')return null;
   if(!masterOn)return {code:'MASTER OFF',reason:'Master authority is offline'};
-  if((field==='licensing_enabled'||field==='customer_self_unlock_enabled')&&maintenanceOn){
-   return {code:'MAINTENANCE',reason:'Maintenance enforcement is active'};
+  if(field!=='maintenance_mode'&&maintenanceOn){
+   return {code:'HANDOVER',reason:'Only switch coordination, source discovery, pulses and Base connection remain available'};
   }
   if(DEPLOYMENT_FIELDS.includes(field as (typeof DEPLOYMENT_FIELDS)[number])&&!deploymentOn){
    return {code:'DEPLOYMENT OFF',reason:'Deployment authorization is offline'};
