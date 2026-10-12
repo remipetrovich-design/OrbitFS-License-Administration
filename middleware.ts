@@ -22,7 +22,29 @@ export async function middleware(request: NextRequest) {
         headers: { accept: 'application/json' },
       });
       if (!status.ok) throw new Error('source discovery failed');
-      const state = await status.json() as { mode?: string };
+      const state = await status.json() as { mode?: string; handoverMode?: boolean };
+      // Handover Mode is a server-enforced minimal operating state, not
+      // merely a set of disabled switches in the admin dashboard.
+      if (state.mode === DEPLOYED_FAMILY && state.handoverMode === true) {
+        const admin =
+          pathname === '/' ||
+          pathname === '/settings' || pathname.startsWith('/settings/') ||
+          pathname === '/login' || pathname.startsWith('/login/') ||
+          pathname === '/logout' || pathname.startsWith('/logout/') ||
+          pathname.startsWith('/api/auth/');
+        const coordination =
+          pathname === DISCOVERY ||
+          pathname === '/api/v1/source-routing' ||
+          pathname === '/api/v1/github-profile' ||
+          pathname === '/api/v1/source-handover' ||
+          pathname === '/api/v1/license/health' ||
+          pathname.startsWith('/api/v1/license/pulse');
+        if (!admin && !coordination) {
+          return NextResponse.json({ error: 'HANDOVER_MINIMAL_MODE' }, {
+            status: 503, headers: { 'cache-control': 'no-store' },
+          });
+        }
+      }
       if (state.mode !== DEPLOYED_FAMILY) {
         return NextResponse.json({ error: 'SOURCE_MODE_STANDBY', activeMode: state.mode ?? null }, {
           status: 503, headers: { 'cache-control': 'no-store' },
