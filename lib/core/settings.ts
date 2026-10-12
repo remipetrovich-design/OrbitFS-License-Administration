@@ -293,18 +293,20 @@ async function verifyGithubProfileTarget(profile:GithubProfileName){
   if(!credentials.length)throw new Error('Cannot activate '+profile.toUpperCase()+': no configured GitHub credential is available for the target repository family');
   for(const item of target.repos){
     let verified:{sha:string;credential:string}|null=null;
+    const failures:string[]=[];
     for(const credential of credentials){
       const headers:Record<string,string>={accept:'application/vnd.github+json','x-github-api-version':'2022-11-28'};
       if(credential.value)headers.authorization='Bearer '+credential.value;
       const repoResponse=await fetch('https://api.github.com/repos/'+item.repo,{headers,cache:'no-store'});
-      if(!repoResponse.ok)continue;
+      if(!repoResponse.ok){failures.push(credential.name+' repository HTTP '+repoResponse.status);continue;}
       const refResponse=await fetch('https://api.github.com/repos/'+item.repo+'/git/ref/heads/'+encodeURIComponent(item.ref),{headers,cache:'no-store'});
-      if(!refResponse.ok)continue;
+      if(!refResponse.ok){failures.push(credential.name+' branch HTTP '+refResponse.status);continue;}
       const ref=await refResponse.json();
       const sha=String(ref?.object?.sha||'').trim();
       if(/^[a-f0-9]{40}$/i.test(sha)){verified={sha,credential:credential.name};break;}
+      failures.push(credential.name+' returned an invalid branch SHA');
     }
-    if(!verified)throw new Error('Cannot activate '+profile.toUpperCase()+': no configured License Manager GitHub credential can read '+item.repo+'@'+item.ref);
+    if(!verified)throw new Error('Cannot activate '+profile.toUpperCase()+': '+item.repo+'@'+item.ref+' could not be verified. '+failures.join('; ')+'. Check the variable in the deployed License Manager Production environment and grant that token repository access.');
     checked.push({repo:item.repo,ref:item.ref,sha:verified.sha,credential:verified.credential});
   }
   return checked;
