@@ -2,17 +2,17 @@ import {db} from '../db';
 import type {SourceFamily} from './source-vercel';
 import {configuredVercelFamily,verifyVercelAccountProjects} from './source-vercel';
 
-type Service = {repo:string;workflow:string;projectId:string};
+type Service = {repo:string;workflow:string;projectId:string;healthUrl:string};
 const WORKFLOWS:Record<SourceFamily,Service[]>={
  primary:[
-  {repo:'lucaskerim123/Custom-licence-manager',workflow:'quick-deploy.yml',projectId:'prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv'},
-  {repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml',projectId:'prj_o5ju4zFGSDZelX4SA7GAu3rQqtap'},
-  {repo:'lucaskerim123/V2_Billing_Store',workflow:'quick-redesign-deploy.yml',projectId:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd'},
+  {repo:'lucaskerim123/Custom-licence-manager',workflow:'quick-deploy.yml',projectId:'prj_rxRaSrRX2xwnmJ21zfjYL31RkLsv',healthUrl:'https://incendiarynetworks.cc/api/v1/license/health'},
+  {repo:'lucaskerim123/Dev-panel',workflow:'deploy-dev-panel.yml',projectId:'prj_o5ju4zFGSDZelX4SA7GAu3rQqtap',healthUrl:'https://dev.incendiarynetworks.cc'},
+  {repo:'lucaskerim123/V2_Billing_Store',workflow:'quick-redesign-deploy.yml',projectId:'prj_3ARdg4cRikU2OiMeZjZDvQ3JuEZd',healthUrl:'https://orbitfsstore.vercel.app'},
  ],
  fallback:[
-  {repo:'remipetrovich-design/OrbitFS-License-Administration',workflow:'quick-deploy.yml',projectId:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8'},
-  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ'},
-  {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',workflow:'quick-redesign-deploy.yml',projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq'},
+  {repo:'remipetrovich-design/OrbitFS-License-Administration',workflow:'quick-deploy.yml',projectId:'prj_rCooJWY8JMkBjekXLO8scT35UPJ8',healthUrl:'https://lm.incendiarynetworks.cc/api/v1/license/health'},
+  {repo:'remipetrovich-design/OrbitFS-Control-Centre',workflow:'deploy-dev-panel.yml',projectId:'prj_24FvbyWw7CAEbiug1Ec18p51z7WJ',healthUrl:'https://orbitfs-dev-panel-fallback.vercel.app'},
+  {repo:'remipetrovich-design/OrbitFS-Billing-Shopfront',workflow:'quick-redesign-deploy.yml',projectId:'prj_BZNKPOm5pTcMdD4QrOXPOqpE7Imq',healthUrl:'https://orbitfs-billing-fallback.vercel.app'},
  ]
 };
 
@@ -132,22 +132,35 @@ export async function prepareFallbackGithubProduction(actorUserId:string|null,ac
  return {repositories,prepared:repositories.length===3};
 }
 
+async function applicationReady(service:Service):Promise<boolean>{
+ try{
+  const response=await fetch(service.healthUrl,{
+   cache:'no-store',redirect:'manual',signal:AbortSignal.timeout(6500),
+   headers:{accept:'application/json, text/html'}
+  });
+  // Login redirects are acceptable for protected admin frontends, but
+  // HTTP 401/403/404/5xx and network errors must block handover.
+  return response.ok||[301,302,303,307,308].includes(response.status);
+ }catch{return false;}
+}
+
 async function latestReadyDeployment(service:Service,token:string,teamId:string){
  let response:Response;
  try{response=await fetch('https://api.vercel.com/v6/deployments?projectId='+encodeURIComponent(service.projectId)+
-  '&teamId='+encodeURIComponent(teamId)+'&target=production&state=READY&limit=1',{
+  '&teamId='+encodeURIComponent(teamId)+'&target=production&limit=1',{
    cache:'no-store',headers:{authorization:'Bearer '+token,accept:'application/json'},
    signal:AbortSignal.timeout(12000)
   });}catch{throw new Error('Vercel project health check timed out for '+service.repo);}
  if(!response.ok)throw new Error('Vercel denied the Production health check for '+service.repo+' (HTTP '+response.status+').');
  const data=await response.json() as {deployments?:Array<{id?:string;readyState?:string}>};
- return Array.isArray(data.deployments)&&data.deployments.length>0;
+ return Array.isArray(data.deployments)&&data.deployments.length>0&&
+  data.deployments[0].readyState==='READY';
 }
 export async function inspectSourceDeployments(profile:SourceFamily){
  const {vercel,teamId}=credentials(profile);
  const statuses=await Promise.all(WORKFLOWS[profile].map(async service=>({
   repo:service.repo,projectId:service.projectId,
-  ready:await latestReadyDeployment(service,vercel,teamId)
+  ready:(await latestReadyDeployment(service,vercel,teamId))&&(await applicationReady(service))
  })));
  return {profile,services:statuses,allReady:statuses.every(x=>x.ready)};
 }
