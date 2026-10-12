@@ -44,6 +44,20 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
 
 export default function GithubProfileControl({profile,masterOffline,canManage,action,reconcileAction,prepareFallbackAction,missingRequirements=[]}:Props){
  const [serviceStatus,setServiceStatus]=useState<{status:string;message:string}|null>(null);
+ const [handover,setHandover]=useState<{mode:string;stage:string;revision:number|null;received:number;applied:number;failed:number}|null>(null);
+ useEffect(()=>{
+  if(!canManage)return;
+  let canceled=false;
+  const refresh=async()=>{
+   try{
+    const response=await fetch('/api/v1/source-handover',{cache:'no-store'});
+    if(response.ok&&!canceled)setHandover(await response.json());
+   }catch{}
+  };
+  void refresh();
+  const interval=setInterval(()=>{void refresh()},10000);
+  return ()=>{canceled=true;clearInterval(interval)};
+ },[canManage,profile]);
  useEffect(()=>{
   if(!canManage)return;
   let canceled=false;
@@ -97,6 +111,11 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
         <span className="github-mode-lamp is-red" aria-hidden="true"/><strong>FALLBACK</strong><small>remipetrovich-design · Fallback Vercel</small>
        </div>
      </div>
+     {handover&&handover.revision!==null&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
+       <strong>Handover revision #{handover.revision}: {handover.stage.replaceAll('_',' ')}</strong>
+       <p>Runtime receipts: {handover.applied} applied · {handover.received} received · {handover.failed} failed.</p>
+       <small>Source mode is {handover.mode.toUpperCase()}. Previous-mode shutdown remains locked until installation routing is independently verified.</small>
+     </div>}
      {serviceStatus&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
        <strong>Production service activation: {serviceStatus.status.toUpperCase()}</strong>
        <p>{serviceStatus.message}</p>
