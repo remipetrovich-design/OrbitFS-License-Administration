@@ -471,7 +471,9 @@ export async function getSourceHandoverStatus(){
   received,applied,failed,
   // This is observable receipt state, not proof of both Base and Engine
   // changing API provider or evidence that old services may be disabled.
-  confirmed:false
+  confirmed:false,
+  shutdownAllowed:false,
+  reason:'Pulse receipts are not authenticated deployment-attestation records.'
  };
 }
 
