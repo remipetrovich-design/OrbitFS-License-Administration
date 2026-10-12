@@ -392,16 +392,21 @@ export async function setGithubProfile(
   const destination=await inspectSourceDeployments(next);
   if(!destination.allReady){
     const absent=destination.services.filter(service=>!service.ready).map(service=>service.repo);
+    const licenseRepo=next==='fallback'
+      ?'remipetrovich-design/OrbitFS-License-Administration'
+      :'lucaskerim123/Custom-licence-manager';
+    const stage=absent.includes(licenseRepo)?'license-manager':'other-services';
+    const required=stage==='license-manager'?[licenseRepo]:absent;
     const recent=(await db().query(
-      "select 1 from audit_events where action='github_profile.handover_preparing' and details->>'from'=$1 and details->>'to'=$2 and created_at>now()-interval '10 minutes' limit 1",
-      [expected,next]
+      "select 1 from audit_events where action='github_profile.handover_preparing' and details->>'from'=$1 and details->>'to'=$2 and details->>'stage'=$3 and created_at>now()-interval '10 minutes' limit 1",
+      [expected,next,stage]
     )).rowCount;
     if(recent)throw new Error('Destination services are being prepared: '+absent.join(', ')+'. Waiting for previously queued deployments. Current mode remains active.');
-    const queued=await dispatchSourceProductionDeployments(next,absent);
+    const queued=await dispatchSourceProductionDeployments(next,required);
     await db().query(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
        values($1,$2,'github_profile.handover_preparing','system_settings','github_profile',$3)`,
-      [actorUserId,actor,JSON.stringify({from:expected,to:next,queued,ready:destination.services,database_changed:false})],
+      [actorUserId,actor,JSON.stringify({from:expected,to:next,stage,queued,ready:destination.services,database_changed:false})],
     );
     throw new Error('Destination services are being prepared: '+queued.join(', ')+'. Current mode remains active. Verify readiness and move the lever again to complete handover.');
   }
