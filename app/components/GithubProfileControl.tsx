@@ -1,9 +1,9 @@
 'use client';
-import {useActionState,useEffect,useState} from 'react';
+import {useActionState,useEffect,useRef,useState} from 'react';
 import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
-export type SourceSwitchResult={status:'idle'|'error'|'success';message:string};
+export type SourceSwitchResult={status:'idle'|'error'|'preparing'|'success';message:string};
 type Props={
  profile:GithubProfile;
  masterOffline:boolean;
@@ -61,6 +61,12 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
   void prepareFallbackAction().then(result=>setPrepareResult(result)).catch(()=>setPrepareResult({status:'error',message:'Fallback preparation request failed. No source switch was performed.'})).finally(()=>setPreparing(false));
  };
  const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
+ const switchForm=useRef<HTMLFormElement>(null);
+ useEffect(()=>{
+  if(result.status!=='preparing'||!masterOffline||!canManage)return;
+  const timer=setTimeout(()=>switchForm.current?.requestSubmit(),20000);
+  return ()=>clearTimeout(timer);
+ },[result,masterOffline,canManage]);
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
@@ -79,7 +85,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <strong>{masterOffline?'MASTER OFF':'SWITCH LOCKED'}</strong>
       <small>{masterOffline?'Tick the checkbox to unlock the lever':'Turn Master Authority OFF first'}</small>
     </div></div>
-    <form action={formAction}>
+    <form action={formAction} ref={switchForm}>
      <input type="hidden" name="profile" value={target}/>
      <input type="hidden" name="expected_profile" value={profile}/>
      <div className="github-mode-console">
@@ -102,6 +108,9 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
        <ul style={{paddingLeft:20,marginTop:6}}>{missingRequirements.map(key=><li key={key}><code>{key}</code></li>)}</ul>
        <p>These are server-side preflight credentials. They can use your existing account tokens; the two GitHub/Vercel families must remain separate.</p>
      </div>}
+     {result.status==='preparing'&&<p role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
+       <strong>Preparing {targetLabel}.</strong> {result.message} The lever will automatically retry while this page is open.
+     </p>}
      {result.status==='error'&&<p role="alert" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #dc5555',borderRadius:8,background:'rgba(239,68,68,.12)',fontSize:12}}>
        <strong>Switch not completed.</strong> {result.message} The active mode was not changed by this failed request.
      </p>}
