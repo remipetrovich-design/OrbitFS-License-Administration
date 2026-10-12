@@ -380,7 +380,7 @@ export async function setGithubProfile(
   // First verify the authority interlock and stale form data. The DB
   // transaction below repeats both checks under a row lock before mutation.
   const before=(await db().query('select system_enabled,maintenance_mode,github_profile from system_settings where id=true')).rows[0];
-  if(Boolean(before?.system_enabled)&&!Boolean(before?.maintenance_mode))throw new Error('Enable Maintenance Enforcement (Handover Mode) or turn Master Authority OFF before changing MAIN/FALLBACK.');
+  if((!Boolean(before?.system_enabled)||!Boolean(before?.maintenance_mode)))throw new Error('Turn Master Authority ON and enable Maintenance / Handover Mode before changing MAIN/FALLBACK.');
   const prior=String(before?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
   if(prior!==expected)throw new Error('Source mode changed since this page loaded. Refresh first.');
 
@@ -422,7 +422,7 @@ export async function setGithubProfile(
     await client.query('begin');
     const current=(await client.query('select system_enabled,maintenance_mode,github_profile from system_settings where id=true for update')).rows[0];
     const actual=String(current?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
-    if(Boolean(current?.system_enabled)&&!Boolean(current?.maintenance_mode))throw new Error('Enable Maintenance Enforcement (Handover Mode) or turn Master Authority OFF before switching');
+    if((!Boolean(current?.system_enabled)||!Boolean(current?.maintenance_mode)))throw new Error('Enable Maintenance Enforcement (Handover Mode) or turn Master Authority OFF before switching');
     if(actual!==expected)throw new Error('Source mode changed since this page was loaded. Refresh before switching.');
     // Publish the mode and pulse revision in the same transaction. This avoids
     // a selected mode becoming visible without a durable refresh directive.
