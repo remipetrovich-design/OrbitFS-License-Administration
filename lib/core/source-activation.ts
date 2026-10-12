@@ -66,8 +66,17 @@ async function github(path:string,token:string,method='GET',payload?:Record<stri
     'x-github-api-version':'2022-11-28','content-type':'application/json'},
    ...(payload?{body:JSON.stringify(payload)}:{})
  });}catch{throw new Error('GitHub connection failed during Production credential synchronization.');}
- if(!response.ok)throw new Error('GitHub '+method+' '+(response.status)+
-   ': unable to configure or dispatch the selected repository. Verify that the account token has Actions secrets and Actions workflow write permissions.');
+ if(!response.ok) {
+  const operation=method+' '+path.replace(/\\/g,'/');
+  if(response.status===401)throw new Error(
+    'GitHub 401 at '+operation+': GitHub rejected the stored account token. '+ 
+    'The deployed License Manager may still have an older Production secret; '+ 
+    'check the token used by the active GitHub family and redeploy after changes.');
+  if(response.status===403)throw new Error(
+    'GitHub 403 at '+operation+': authenticated token lacks access or required repository/Actions secret permissions.');
+  throw new Error('GitHub '+response.status+' at '+operation+
+    ': repository operation could not be completed.');
+ }
  if(response.status===204)return {};
  try{return await response.json();}catch{throw new Error('GitHub returned an invalid response.');}
 }
@@ -105,8 +114,9 @@ export async function syncSourceGitHubCredentials(profile:SourceFamily){
  * The Fallback Vercel token is sealed in GitHub before any future handoff.
  */
 export async function prepareFallbackGithubProduction(actorUserId:string|null,actor:string){
- const state=(await db().query('select system_enabled,github_profile from system_settings where id=true')).rows[0];
- if(Boolean(state?.system_enabled))throw new Error('Turn Master Authority OFF before preparing Fallback Production connections.');
+ const state=(await db().query('select system_enabled,maintenance_mode,github_profile from system_settings where id=true')).rows[0];
+ if(Boolean(state?.system_enabled)&&!Boolean(state?.maintenance_mode))
+  throw new Error('Enable Maintenance / Handover Mode or turn Master Authority OFF before preparing Fallback connections.');
  if(String(state?.github_profile)!=='primary')
   throw new Error('MAIN must be active to prepare Fallback without switching. Refresh the page.');
 
