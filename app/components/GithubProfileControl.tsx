@@ -36,9 +36,9 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
  return <button type="submit"
    className={`github-mode-lever ${profile==='fallback'?'points-down':'points-up'}`}
    disabled={!enabled||pending}
-   aria-label={pending?'Switching source mode…':enabled?`Switch source mode to ${targetLabel}`:'Turn Master Authority OFF and tick the acknowledgment checkbox'}
+   aria-label={pending?'Switching source mode…':enabled?`Switch source mode to ${targetLabel}`:'Enable Maintenance / Handover Mode or turn Master Authority OFF, then tick the acknowledgment checkbox'}
    aria-disabled={!enabled||pending}
-   title={!enabled?'Master Authority must be OFF and the checkbox ticked before switching':`Switch to ${targetLabel}`}
+   title={!enabled?'Enable Maintenance / Handover Mode (or Master OFF) and tick the checkbox before switching':`Switch to ${targetLabel}`}
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
@@ -83,8 +83,8 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
       <span>ORBITFS SOURCE AUTHORITY</span><h2>MAIN / FALLBACK</h2>
       <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged and automatically provisions GitHub/Vercel account credentials and queues the selected service deployments. Domain routing is checked separately.</p>
     </div><div className={`github-mode-status ${masterOffline?'ready':'blocked'}`}>
-      <strong>{masterOffline?'MASTER OFF':'SWITCH LOCKED'}</strong>
-      <small>{masterOffline?'Tick the checkbox to unlock the lever':'Turn Master Authority OFF first'}</small>
+      <strong>{masterOffline?'HANDOVER READY':'SWITCH LOCKED'}</strong>
+      <small>{masterOffline?'Tick the checkbox to unlock the lever':'Enable Maintenance / Handover Mode or turn Master OFF'}</small>
     </div></div>
     <form action={formAction}>
      <input type="hidden" name="profile" value={target}/>
@@ -134,13 +134,13 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
        <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!masterOffline}
          onChange={event=>setAcknowledged(event.target.checked)} required/>
        <span><strong>I understand this switches production source authority to {targetLabel}.</strong>
-        <small>Master Authority must be OFF. GitHub repositories and deployment workflows are checked before switching.
+        <small>Maintenance / Handover Mode or Master OFF is required. GitHub repositories and deployment workflows are checked before switching.
         Both Vercel accounts keep their own projects; this action requests the target deployments but never migrates a database.</small>
        </span>
      </label>}
      <div className="github-mode-footer">
       <strong>ACTIVE: {activeLabel}</strong>
-      <span>{masterOffline?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Master Authority is ON — switching disabled'}</span>
+      <span>{masterOffline?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Enable Maintenance / Handover Mode to unlock the switch'}</span>
      </div>
     </form>
     {profile==='primary'&&canManage&&<div style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
@@ -150,7 +150,7 @@ export default function GithubProfileControl({profile,masterOffline,canManage,ac
         style={{padding:'8px 12px',marginTop:8,borderRadius:7,border:'1px solid currentColor',fontWeight:600}}>
         {preparing?'Preparing Fallback…':'Prepare Fallback GitHub connections'}
       </button>
-      <p style={{marginTop:6}}>Requires Master Authority OFF. Does not switch modes, deploy applications, or change the shared database.</p>
+      <p style={{marginTop:6}}>Requires Maintenance / Handover Mode or Master OFF. Does not switch modes, deploy applications, or change the shared database.</p>
       {prepareResult&&<p role={prepareResult.status==='error'?'alert':'status'} style={{marginTop:8,fontWeight:600}}>
         {prepareResult.status==='success'?'Prepared: ':'Not prepared: '}{prepareResult.message}
       </p>}
