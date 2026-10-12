@@ -1,3 +1,4 @@
+import {resumeSourceServices,pausePreviousSourceServices} from './source-pause';
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
 import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
@@ -395,6 +396,8 @@ export async function setGithubProfile(
   const githubSecrets=await syncSourceGitHubCredentials(next);
   // Stage the destination while keeping the old family authoritative. A
   // deployment dispatch is not proof of readiness and must never flip mode.
+  // A paused destination must be resumed before its fresh deployment can be checked.
+  await resumeSourceServices(next);
   const destination=await inspectSourceDeployments(next);
   if(!destination.allReady){
     const absent=destination.services.filter(service=>!service.ready).map(service=>service.repo);
@@ -452,7 +455,15 @@ export async function setGithubProfile(
       })],
     );
     await client.query('commit');
-    return {...updated,sourceActivation:{queued:[],failed:[],pulseRevision:Number(updated.pulse_revision)}};
+    // The old mode must not remain a second online Vercel family.
+    // Record a partial cutover explicitly if Vercel refuses any pause operation.
+    let pauseFailure:string|null=null;
+    try{await pausePreviousSourceServices(expected);}
+    catch(error){pauseFailure=error instanceof Error?error.message:'Previous family pause failed';}
+    return {...updated,sourceActivation:{
+      queued:[],failed:pauseFailure?[pauseFailure]:[],
+      pulseRevision:Number(updated.pulse_revision)
+    }};
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;
