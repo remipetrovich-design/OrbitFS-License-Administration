@@ -16,7 +16,8 @@ export async function GET(request:Request){
   const settings=await getSettings();
   const handover=await getSourceHandoverStatus();
   const mode=settings?.github_profile==='fallback'?'fallback':'primary';
-  const profile=process.env.ORBITFS_SOURCE_FAMILY==='fallback'?'fallback':'primary';
+  // The Vercel project identity is fixed to this repository's License Manager.
+  const profile='fallback';
   if(mode!==profile)return NextResponse.json({ok:true,stage:'standby',mode});
   const destination=await inspectSourceDeployments(mode);
   // Fail closed: no production shutdown or mode mutation on cron. It records
