@@ -373,8 +373,8 @@ export async function setGithubProfile(
 
   // First verify the authority interlock and stale form data. The DB
   // transaction below repeats both checks under a row lock before mutation.
-  const before=(await db().query('select system_enabled,github_profile from system_settings where id=true')).rows[0];
-  if(Boolean(before?.system_enabled))throw new Error('Turn Master Authority OFF before changing MAIN/FALLBACK mode.');
+  const before=(await db().query('select system_enabled,maintenance_mode,github_profile from system_settings where id=true')).rows[0];
+  if(Boolean(before?.system_enabled)&&!Boolean(before?.maintenance_mode))throw new Error('Enable Maintenance Enforcement (Handover Mode) or turn Master Authority OFF before changing MAIN/FALLBACK.');
   const prior=String(before?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
   if(prior!==expected)throw new Error('Source mode changed since this page loaded. Refresh first.');
 
@@ -409,9 +409,9 @@ export async function setGithubProfile(
   const client=await pool.connect();
   try{
     await client.query('begin');
-    const current=(await client.query('select system_enabled,github_profile from system_settings where id=true for update')).rows[0];
+    const current=(await client.query('select system_enabled,maintenance_mode,github_profile from system_settings where id=true for update')).rows[0];
     const actual=String(current?.github_profile||'primary').toLowerCase()==='fallback'?'fallback':'primary';
-    if(Boolean(current?.system_enabled))throw new Error('Master Authority must be OFF before changing MAIN/FALLBACK mode');
+    if(Boolean(current?.system_enabled)&&!Boolean(current?.maintenance_mode))throw new Error('Enable Maintenance Enforcement (Handover Mode) or turn Master Authority OFF before switching');
     if(actual!==expected)throw new Error('Source mode changed since this page was loaded. Refresh before switching.');
     // Publish the mode and pulse revision in the same transaction. This avoids
     // a selected mode becoming visible without a durable refresh directive.
@@ -430,7 +430,7 @@ export async function setGithubProfile(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
        values($1,$2,'github_profile.changed','system_settings','github_profile',$3)`,
       [actorUserId,actor,JSON.stringify({
-        from:actual,to:next,master_authority_offline:true,
+        from:actual,to:next,handover_interlock:Boolean(current?.maintenance_mode)?'maintenance':'master_off',
         acknowledged:true,github_targets:checked,
         vercel_deployment_workflows:destinations,
         verified_vercel_projects:projects,
