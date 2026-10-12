@@ -81,18 +81,18 @@ export default function ReleaseControls({
         </form>
       )}
 
-      {published && releaseType === 'base' && (
+      {published && !archived && (
         <>
-          <form action={action} onSubmit={(e) => { if (!confirm('Withdraw this published Base deployment? It will stop being active and can then be archived.')) e.preventDefault(); }}>
+          <form action={action} onSubmit={(e) => { if (!confirm(releaseType === 'base' ? 'Withdraw this published Base deployment? It will stop being active and can then be archived.' : 'Withdraw this published update from delivery? New installations will no longer receive this release; existing installations are not rolled back.')) e.preventDefault(); }}>
             <input type="hidden" name="id" value={id} />
             <input type="hidden" name="action" value="withdraw" />
-            <button className="button danger" disabled={pending}>Withdraw deployment</button>
+            <button className="button danger" disabled={pending}>{releaseType === "base" ? "Withdraw deployment" : "Withdraw update"}</button>
           </form>
-          <form action={action} onSubmit={(e) => { if (!confirm('Prepare a rollback to the previous published Base deployment?')) e.preventDefault(); }}>
+          {releaseType === 'base' && <form action={action} onSubmit={(e) => { if (!confirm('Prepare a rollback to the previous published Base deployment?')) e.preventDefault(); }}>
             <input type="hidden" name="id" value={id} />
             <input type="hidden" name="action" value="rollback" />
             <button className="button secondary" disabled={pending}>Prepare rollback</button>
-          </form>
+          </form>}
         </>
       )}
 
