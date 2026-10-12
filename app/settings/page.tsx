@@ -58,13 +58,15 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
     '. The active mode changed; production routing is NOT yet complete.'
   };
  }catch(error){
-  // Return a visible form error instead of throwing through Next.js server
-  // actions, which produces an opaque production error digest.
-  return {status:'error',message:error instanceof Error?error.message:'Source-mode check failed. No change was made.'};
+  // A staged destination is not a failed mode change: the original mode is
+  // still active, and the owner UI may poll readiness and complete cutover.
+  const message=error instanceof Error?error.message:'Source-mode check failed. No change was made.';
+  if(message.startsWith('Destination services are being prepared:'))return {status:'preparing',message};
+  return {status:'error',message};
  }
  revalidatePath('/settings');revalidatePath('/');
  return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
-  '. The target service production builds were requested. Domain routing is not complete until all three are healthy.'};
+  '. Destination deployments passed readiness checks before cutover. A global authority-refresh pulse was issued; runtime acknowledgments and old-mode shutdown remain to be verified.'};
 }
 
 async function prepareFallbackConnections():Promise<{status:'success'|'error';message:string}>{
