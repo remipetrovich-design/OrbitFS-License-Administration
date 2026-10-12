@@ -144,7 +144,10 @@ async function applicationReady(service:Service):Promise<boolean>{
  }catch{return false;}
 }
 
-async function latestReadyDeployment(service:Service,token:string,teamId:string){
+async function latestReadyDeployment(service:Service,token:string,teamId:string,githubToken:string){
+ const ref=await github('/repos/'+service.repo+'/git/ref/heads/main',githubToken) as {object?:{sha?:string}};
+ const expectedSha=String(ref.object?.sha||'').toLowerCase();
+ if(!/^[a-f0-9]{40}$/.test(expectedSha))throw new Error('Invalid destination main commit');
  let response:Response;
  try{response=await fetch('https://api.vercel.com/v6/deployments?projectId='+encodeURIComponent(service.projectId)+
   '&teamId='+encodeURIComponent(teamId)+'&target=production&limit=1',{
@@ -152,15 +155,17 @@ async function latestReadyDeployment(service:Service,token:string,teamId:string)
    signal:AbortSignal.timeout(12000)
   });}catch{throw new Error('Vercel project health check timed out for '+service.repo);}
  if(!response.ok)throw new Error('Vercel denied the Production health check for '+service.repo+' (HTTP '+response.status+').');
- const data=await response.json() as {deployments?:Array<{id?:string;readyState?:string}>};
- return Array.isArray(data.deployments)&&data.deployments.length>0&&
-  data.deployments[0].readyState==='READY';
+ const data=await response.json() as {deployments?:Array<{id?:string;readyState?:string;state?:string;meta?:{githubCommitSha?:string;githubOrg?:string;githubRepo?:string}}>};
+ const deployed=data.deployments?.[0];
+ return Boolean(deployed&&(deployed.readyState==='READY'||deployed.state==='READY')&&
+  String(deployed.meta?.githubCommitSha||'').toLowerCase()===expectedSha&&
+  String(deployed.meta?.githubOrg||'')+'/'+String(deployed.meta?.githubRepo||'')===service.repo);
 }
 export async function inspectSourceDeployments(profile:SourceFamily){
- const {vercel,teamId}=credentials(profile);
+ const {github:githubToken,vercel,teamId}=credentials(profile);
  const statuses=await Promise.all(WORKFLOWS[profile].map(async service=>({
   repo:service.repo,projectId:service.projectId,
-  ready:(await latestReadyDeployment(service,vercel,teamId))&&(await applicationReady(service))
+  ready:(await latestReadyDeployment(service,vercel,teamId,githubToken))&&(await applicationReady(service))
  })));
  return {profile,services:statuses,allReady:statuses.every(x=>x.ready)};
 }
