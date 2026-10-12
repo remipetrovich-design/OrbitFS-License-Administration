@@ -114,7 +114,7 @@ jobs:
             if [ -n "$current_url" ]; then
               echo "deployment_url=https://$current_url" >> "$GITHUB_OUTPUT"
             fi
-            echo "Same source commit is already READY. Manual Quick Deploy will still create a fresh deployment to apply current Production configuration."
+            echo "Same commit already READY. Manual deployment will still rebuild to apply Production environment variables."
           else
             echo "already_deployed=false" >> "$GITHUB_OUTPUT"
             echo "Previous production commit from this repository: ${deployed_sha:-none}"
@@ -139,7 +139,7 @@ jobs:
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "No file changes exist between the previous production deployment and $GITHUB_SHA."
-            echo "No source diff detected. Manual Quick Deploy will still rebuild to apply updated Production environment variables."
+            echo "No source diff. A manual deployment will still rebuild to apply Production environment variables."
           fi
 
       - name: Upload quick-deploy change manifest
@@ -191,15 +191,24 @@ jobs:
           if(Number(config.version)!==3) throw new Error('Unexpected Vercel Build Output API version');
           NODE
 
-      - name: Skip no-op deployment
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.already_deployed != 'true') && (steps.change_manifest.outputs.has_changes != 'true') }}
+      - name: Verify manual deployment source before production
+        if: steps.profile.outputs.deploy == 'true'
+        shell: bash
         run: |
-          echo "Quick deployment not required because the selected commit has no file changes since the previous production deployment."
-          echo "Commit: $GITHUB_SHA"
-          echo "Changed files: ${{ steps.change_manifest.outputs.changed_file_count }}"
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
 
-      - name: Reuse existing production deployment
-        if: ${{ steps.profile.outputs.deploy == 'true' && (steps.production_state.outputs.al/}"
+      - name: Deploy quick artifact to production
+        if: steps.profile.outputs.deploy == 'true'
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          github_org="${GITHUB_REPOSITORY%%/*}"
+          github_repo="${GITHUB_REPOSITORY#*/}"
           deployment_url="$(vercel deploy --prebuilt --archive=tgz --prod --yes \
             --token="$VERCEL_TOKEN" \
             --scope="$VERCEL_SCOPE" \
