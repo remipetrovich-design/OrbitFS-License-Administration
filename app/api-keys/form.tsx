@@ -1,7 +1,7 @@
 'use client';
 import {useState} from 'react';
 
-export default function ApiKeyForm({action,scopes}:{action:(formData:FormData)=>Promise<string|undefined>;scopes:string[]}){
+export default function ApiKeyForm({action,scopes,defaultEnvironment}:{action:(formData:FormData)=>Promise<string|undefined>;scopes:string[];defaultEnvironment:'main'|'fallback'}){
  // Newly introduced database package privileges must be explicitly selected.
  const initialScopes=()=>scopes.filter(scope=>!scope.startsWith('database.packages.'));
  const [selected,setSelected]=useState<string[]>(initialScopes);
@@ -18,6 +18,7 @@ export default function ApiKeyForm({action,scopes}:{action:(formData:FormData)=>
 
  return <div className="api-key-create-panel">
   <form className="form" onSubmit={submit}>
+   <label>System<select className="input" name="environment" defaultValue={defaultEnvironment} required><option value="main">Main</option><option value="fallback">Fallback</option></select></label>
    <label>Name<input className="input" name="name" placeholder="Billing Store / release builder / deployer" required/></label>
    <div><strong className="form-label">Permissions</strong><div className="scope-grid compact-scope-grid">{scopes.map(s=><label className="scope-chip" key={s}><input type="checkbox" checked={selected.includes(s)} onChange={e=>setSelected(v=>e.target.checked?[...v,s]:v.filter(x=>x!==s))}/><span><b>{s}</b></span></label>)}</div></div>
    <div><button className="button" type="submit" disabled={!selected.length}>Create integration key</button></div>
