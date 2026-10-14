@@ -235,7 +235,7 @@ export default async function Settings(){
 
   <section className="section">
    <div className="section-head"><div><div className="eyebrow">Runtime authority</div><h2>API controls</h2><p className="muted">MAIN / FALLBACK sits directly above the authority board. Lever up is OFF/red and lever down is ON/green. Master shutdown disables every child control; maintenance suppresses licence validation and customer unlock; deployment authorization suppresses Base, Update and rollback controls. Configured child states are preserved while a parent is offline.</p></div></div>
-   <GithubProfileControl profile={githubProfile} handoverReady={masterEnabled&&maintenance} allowPreparation={!masterEnabled||maintenance} canManage={user.role==='owner'} action={switchGithubProfile} reconcileAction={autoRepairSourceServices} prepareFallbackAction={prepareFallbackConnections}
+   <GithubProfileControl profile={githubProfile} handoverReady={true} allowPreparation={!masterEnabled||maintenance} canManage={user.role==='owner'} action={switchGithubProfile} reconcileAction={autoRepairSourceServices} prepareFallbackAction={prepareFallbackConnections}
       missingRequirements={githubProfile==='primary'
        ? ['ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN'].filter(key=>!String(process.env[key]||'').trim() || /^(change-me|placeholder|replace-with)/i.test(String(process.env[key]||'').trim()))
        : ['ORBITFS_MAIN_VERCEL_TOKEN',...(!String(process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN||'').trim()?['ORBITFS_PRIMARY_GITHUB_TOKEN or ORBITFS_RELEASE_DISPATCH_TOKEN']:[])].filter(key=>key.includes(' or ')||!String(process.env[key]||'').trim())}
