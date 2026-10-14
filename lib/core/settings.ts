@@ -1,4 +1,4 @@
-import {resumeSourceServices,pausePreviousSourceServices} from './source-pause';
+import {resumeSourceServices} from './source-pause';
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
 import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
@@ -455,11 +455,11 @@ export async function setGithubProfile(
     await client.query('commit');
     // The old mode must not remain a second online Vercel family.
     // Record a partial cutover explicitly if Vercel refuses any pause operation.
-    let pauseFailure:string|null=null;
-    try{await pausePreviousSourceServices(expected);}
-    catch(error){pauseFailure=error instanceof Error?error.message:'Previous family pause failed';}
+    // Do not pause the previous License Manager before installed clients
+    // can read the switch pulse. Standby middleware blocks operations, while
+    // the old public entrypoints remain available for safe handover routing.
     return {...updated,sourceActivation:{
-      queued:[],failed:pauseFailure?[pauseFailure]:[],
+      queued:[],failed:[],
       pulseRevision:Number(updated.pulse_revision)
     }};
   }catch(error){
