@@ -1,5 +1,5 @@
 import {requireUser} from '../../lib/session';
-import {listApiKeys,createApiKey,revokeApiKey,deleteRevokedApiKey,regenerateApiKey,ApiScope} from '../../lib/core/api-keys';
+import {listApiKeys,createApiKey,revokeApiKey,deleteRevokedApiKey,regenerateApiKey,ApiScope,ApiKeyEnvironment,API_KEY_ENVIRONMENT} from '../../lib/core/api-keys';
 import ApiKeyForm from './form';
 import RegenerateApiKey from './regenerate-control';
 import SideNav from '../components/SideNav';
@@ -15,7 +15,9 @@ async function create(formData:FormData){
  const name=String(formData.get('name')||'').trim();
  const selected=String(formData.get('scopes')||'').split(',').filter((x):x is ApiScope=>scopes.includes(x as ApiScope));
  if(!name||!selected.length)return;
- const result=await createApiKey({name,scopes:selected,actorUserId:u.id});
+ const environment=String(formData.get('environment')||'') as ApiKeyEnvironment;
+ if(environment!=='main'&&environment!=='fallback')throw new Error('Select Main or Fallback.');
+ const result=await createApiKey({name,scopes:selected,actorUserId:u.id,environment});
  return result.key;
 }
 async function regenerate(formData:FormData){
@@ -41,7 +43,7 @@ export default async function ApiKeys(){
 
   <section className="card form-card">
    <div className="section-head"><div><div className="eyebrow">Machine credentials</div><h2>Create integration key</h2><p className="muted">Issue credentials here only. API Control no longer duplicates credential management.</p></div></div>
-   {canManage?<ApiKeyForm action={create} scopes={scopes}/>:<div className="notice">Only Owner and Admin accounts can create, regenerate or revoke integration keys.</div>}
+   {canManage?<ApiKeyForm action={create} scopes={scopes} defaultEnvironment={API_KEY_ENVIRONMENT}/>:<div className="notice">Only Owner and Admin accounts can create, regenerate or revoke integration keys.</div>}
   </section>
 
   <details className="section card collapsible-card">
@@ -52,11 +54,12 @@ export default async function ApiKeys(){
    <div className="collapsible-body">
     <TableTools targetId="api-key-table" filters={statuses} pageSize={6}/>
     <div className="table-shell" id="api-key-table"><table className="table api-key-table">
-     <thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Status</th><th>Last used</th><th>Control</th></tr></thead>
-     <tbody>{keys.map((k:any)=><tr key={k.id} data-row data-filter={k.status} data-search={`${k.name} ${k.key_last4} ${Array.isArray(k.scopes)?k.scopes.join(' '):String(k.scopes)} ${k.status}`}>
+     <thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Environment</th><th>Status</th><th>Last used</th><th>Control</th></tr></thead>
+     <tbody>{keys.map((k:any)=><tr key={k.id} data-row data-filter={k.status} data-search={`${k.name} ${k.key_last4} ${Array.isArray(k.scopes)?k.scopes.join(' '):String(k.scopes)} ${k.status} ${k.environment}`}>
       <td><strong>{k.name}</strong></td>
       <td className="mono">lm_••••{k.key_last4}</td>
       <td><div className="compact-scope-list">{(Array.isArray(k.scopes)?k.scopes:[]).map((scope:string)=><span className="badge" key={scope}>{scope}</span>)}</div></td>
+      <td><strong>{k.environment==='main'?'Main':k.environment==='fallback'?'Fallback':'Unassigned'}</strong></td>
       <td><span className={k.status==='active'?'state-pill online':'state-pill offline'}>{k.status}</span></td>
       <td>{k.last_used_at?new Date(k.last_used_at).toLocaleString():'Never'}</td>
       <td>{canManage&&<div className="actions">{k.status==='active'&&<RegenerateApiKey id={k.id} name={k.name} action={regenerate}/>} {k.status==='active'&&<form action={revoke}><input type="hidden" name="id" value={k.id}/><button className="button danger">Revoke</button></form>}{k.status==='revoked'&&<form action={deleteRevoked}><input type="hidden" name="id" value={k.id}/><button className="button danger">Delete</button></form>}</div>}</td>
