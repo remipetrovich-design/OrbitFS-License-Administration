@@ -59,7 +59,7 @@ function familyReadiness(profile:'primary'|'fallback'){
   if(cached&&cached.until>Date.now())return cached.promise;
   const family=configuredVercelFamily(profile);
   const destinations=profile==='fallback'?FALLBACK_DESTINATIONS:PRIMARY_DESTINATIONS;
-  const token=String(process.env[family.tokenEnv]||'').trim();
+  const token=String((family.tokenEnv==='ORBITFS_FALLBACK_GITHUB_TOKEN'?(process.env.FALLBACK_GITHUB_TOKEN||process.env.FALLBACK_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN):(process.env.MAIN_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN))||'').trim();
   const promise=Promise.all([
     isReady(destinations.panel.projectId,token,family.teamId),
     isReady(destinations.billing.projectId,token,family.teamId),
