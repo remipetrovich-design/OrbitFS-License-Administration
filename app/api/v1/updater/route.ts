@@ -10,8 +10,8 @@ function githubAssetUrl(value:string){try{const u=new URL(value);if(u.hostname!=
 function githubTokensForRepo(repo:string){
   const fallback=repo.startsWith('remipetrovich-design/');
   const names=fallback
-    ?['ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_TOKEN']
-    :['ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN','GITHUB_TOKEN'];
+    ?['FALLBACK_GITHUB_TOKEN','FALLBACK_GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN']
+    :['MAIN_GITHUB_TOKEN','MAIN_GITHUB_RELEASE_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'];
   return [...new Set(names.map(name=>String(process.env[name]||'').trim()).filter(Boolean).concat(''))];
 }
 function requestIp(request:Request){return request.headers.get('x-real-ip')?.trim()||request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||null;}
