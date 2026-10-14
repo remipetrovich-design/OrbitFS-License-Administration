@@ -436,7 +436,17 @@ export async function setGithubProfile(
     await client.query(
       `insert into license_pulses(revision,action,scope,reason,payload,requires_ack,created_by_user_id,created_by)
        values($1,'refresh_authority','global','source-mode-changed',$2,true,$3,$4)`,
-      [updated.pulse_revision,JSON.stringify({source:'github-profile-switch',from:actual,to:next,mode:next==='primary'?'main':'fallback'}),actorUserId,actor]
+      [updated.pulse_revision,JSON.stringify({
+        source:'github-profile-switch',from:actual,to:next,
+        mode:next==='primary'?'main':'fallback',
+        license_api:next==='primary'?'https://incendiarynetworks.cc/api/v1':'https://lm.incendiarynetworks.cc/api/v1',
+        base_source:next==='primary'
+          ?{repo:'lucaskerim123/V1-vercel-base',ref:'base-release'}
+          :{repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'},
+        inner_deployer_source:next==='primary'
+          ?{repo:'lucaskerim123/V1-vercel-engine',ref:'UPDATE_RELEASE'}
+          :{repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASE'}
+       }),actorUserId,actor]
     );
     await client.query(
       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
