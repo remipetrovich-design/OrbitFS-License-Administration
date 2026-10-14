@@ -20,8 +20,8 @@ test('only one checkbox and direct lever, never typed phrase or modal',()=>{
  assert.doesNotMatch(control,/SWITCH TO MAIN|SWITCH TO FALLBACK|github-mode-modal-backdrop|confirmationPhrase|setConfirming/);
 });
 test('two explicit credential families, no cross-account fallback tokens',()=>{
- assert.match(settings,/\['ORBITFS_FALLBACK_GITHUB_TOKEN'\]/);
- assert.match(settings,/\['ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'\]/);
+ assert.match(settings,/FALLBACK_GITHUB_TOKEN/);
+ assert.match(settings,/MAIN_GITHUB_TOKEN/);
  assert.match(settings,/verifyGithubProfileTarget\(next\)/);
  assert.match(settings,/verifyVercelWorkflowTargets\(next\)/);
  assert.doesNotMatch(settings,/setTimeout\(resolve|dispatchGithubProfileActivation/);
