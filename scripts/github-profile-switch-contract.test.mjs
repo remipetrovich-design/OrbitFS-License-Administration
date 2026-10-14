@@ -6,11 +6,11 @@ const settings=readFileSync('lib/core/settings.ts','utf8');
 const page=readFileSync('app/settings/page.tsx','utf8');
 const control=readFileSync('app/components/GithubProfileControl.tsx','utf8');
 
-test('owner-only, Master Authority OFF, and checkbox required server side',()=>{
+test('owner-only and checkbox required server side',()=>{
  assert.match(page,/user\.role!=='owner'/);
  assert.match(page,/formData\.get\('acknowledged'\)==='on'/);
  assert.match(settings,/if\(!acknowledged\)throw new Error/);
- assert.match(settings,/if\(Boolean\(current\?\.system_enabled\)\)throw new Error/);
+ assert.doesNotMatch(settings,/Turn Master Authority ON and enable Maintenance/);
  assert.match(settings,/if\(actual!==expected\)throw new Error/);
 });
 test('only one checkbox and direct lever, never typed phrase or modal',()=>{
@@ -63,6 +63,6 @@ test('failed source switch returns a safe inline form error instead of a Next.js
 test('page names both prerequisite credentials and prevents an invalid target click',()=>{
  assert.match(page,/ORBITFS_FALLBACK_GITHUB_TOKEN/);
  assert.match(page,/ORBITFS_FALLBACK_VERCEL_TOKEN/);
- assert.match(control,/missingRequirements\.length===0/);
+ assert.doesNotMatch(control,/missingRequirements\.length===0/);
  assert.match(control,/MAIN License Manager/);
 });
