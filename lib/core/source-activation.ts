@@ -30,15 +30,16 @@ function credentials(profile:SourceFamily){
  * persisted to Git or the License Manager database.
  */
 export async function syncLicenseManagerAccountConnections(profile:SourceFamily){
- const {vercel,teamId,github:accountGitHub}=credentials(profile);
+ const {vercel,teamId}=credentials(profile);
  const service=WORKFLOWS[profile][0];
  const names=['ORBITFS_MAIN_VERCEL_TOKEN','ORBITFS_FALLBACK_VERCEL_TOKEN',
+  'MAIN_GITHUB_TOKEN','MAIN_GITHUB_RELEASE_TOKEN','FALLBACK_GITHUB_TOKEN','FALLBACK_GITHUB_RELEASE_TOKEN',
   'ORBITFS_FALLBACK_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN'];
  const updated:string[]=[];
  for(const key of names){
   // Release workflow dispatch belongs to the selected GitHub account.
   // Never copy the Main GitHub release credential into Fallback.
-  const value=key==='ORBITFS_RELEASE_DISPATCH_TOKEN'?accountGitHub:String(process.env[key]||'').trim();
+  const value=String(process.env[key]||'').trim();
   if(!value||/^(change-me|replace-with|placeholder|your-)/i.test(value))continue;
   let response:Response;
   try{
