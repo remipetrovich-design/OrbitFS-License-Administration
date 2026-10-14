@@ -45,6 +45,12 @@ export async function middleware(request: NextRequest) {
         }
       }
       if (state.mode !== DEPLOYED_FAMILY) {
+        // Installed runtimes may still be pinned to their former API.
+        // Allow only read-only pulse discovery so they can learn the new
+        // authority and inner-deployer source; block every standby mutation.
+        if (pathname === '/api/v1/license/pulse' && request.method === 'GET') {
+          return NextResponse.next();
+        }
         return NextResponse.json({ error: 'SOURCE_MODE_STANDBY', activeMode: state.mode ?? null }, {
           status: 503, headers: { 'cache-control': 'no-store' },
         });
