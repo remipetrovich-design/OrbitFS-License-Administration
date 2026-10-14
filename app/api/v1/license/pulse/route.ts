@@ -17,6 +17,17 @@ function publicState(s:any){
     },
     source_mode:s?.github_profile==='fallback'?'fallback':'main',
     source_profile:s?.github_profile==='fallback'?'fallback':'primary',
+    // Public targets are sent with every pulse so installed Base/Engine clients
+    // can refresh authority and inner-deployer sources after a mode switch.
+    source_connection:s?.github_profile==='fallback'?{
+      license_api:'https://lm.incendiarynetworks.cc/api/v1',
+      base:{repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'},
+      inner_deployer:{repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASE'},
+    }:{
+      license_api:'https://incendiarynetworks.cc/api/v1',
+      base:{repo:'lucaskerim123/V1-vercel-base',ref:'base-release'},
+      inner_deployer:{repo:'lucaskerim123/V1-vercel-engine',ref:'UPDATE_RELEASE'},
+    },
     authority:{
       system_enabled:Boolean(s?.system_enabled),
       licensing_enabled:Boolean(s?.licensing_enabled),
