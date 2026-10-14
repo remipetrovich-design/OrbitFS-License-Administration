@@ -40,7 +40,11 @@ function componentFor(path: string) {
   return 'shared';
 }
 function githubToken(source:{tokenEnv:string}) {
-  return String(process.env[source.tokenEnv] || '').trim();
+  const fallback=source.repo.startsWith('remipetrovich-design/');
+  const names=fallback
+    ? ['FALLBACK_GITHUB_TOKEN','FALLBACK_GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN']
+    : ['MAIN_GITHUB_TOKEN','MAIN_GITHUB_RELEASE_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN'];
+  return names.map(name=>String(process.env[name]||'').trim()).find(Boolean)||'';
 }
 async function github(source:{repo:string;tokenEnv:string},path: string) {
   const token = githubToken(source);
