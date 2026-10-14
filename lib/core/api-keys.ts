@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { db } from '../db';
 
+export const API_KEY_ENVIRONMENT = 'fallback' as const;
+export type ApiKeyEnvironment = 'main' | 'fallback';
 export type ApiScope = 'license.issue' | 'license.validate' | 'license.manage' | 'releases.read' | 'releases.write' | 'releases.control' | 'deployment.read' | 'deployment.write' | 'database.packages.read' | 'database.packages.write' | 'database.packages.control';
 
 function hashKey(value: string) {
@@ -11,10 +13,11 @@ export function generateApiKey() {
   return `lm_${crypto.randomBytes(32).toString('base64url')}`;
 }
 
-export async function createApiKey(input: { name: string; scopes: ApiScope[]; actorUserId: string }) {
+export async function createApiKey(input: { name: string; scopes: ApiScope[]; actorUserId: string; environment: ApiKeyEnvironment }) {
+  if (input.environment !== 'main' && input.environment !== 'fallback') throw new Error('Invalid key environment.');
   const key = generateApiKey();
   const scopes = Array.from(new Set(input.scopes));
-  const result = await db().query(`insert into api_keys(name,key_hash,key_last4,scopes,created_by) values($1,$2,$3,$4,$5) returning id,name,key_last4,scopes,status,created_at`, [input.name.trim(), hashKey(key), key.slice(-4), JSON.stringify(scopes), input.actorUserId]);
+  const result = await db().query(`insert into api_keys(name,key_hash,key_last4,scopes,created_by,environment) values($1,$2,$3,$4,$5,$6) returning id,name,key_last4,scopes,status,environment,created_at`, [input.name.trim(), hashKey(key), key.slice(-4), JSON.stringify(scopes), input.actorUserId, input.environment]);
   return { ...result.rows[0], key };
 }
 
@@ -50,16 +53,6 @@ function parseScopes(value: unknown): ApiScope[] {
   return [];
 }
 
-function envMachineKey(key: string) {
-  const candidates = [
-    process.env.BILLING_API_TOKEN,
-    process.env.DEPLOYER_API_TOKEN,
-    process.env.MASTER_API_TOKEN,
-    process.env.INTEGRATION_API_TOKEN,
-  ].filter(Boolean) as string[];
-  return candidates.some(candidate => candidate.trim() === key);
-}
-
 export async function authenticateApiKey(request: Request, requiredScope?: ApiScope) {
   const authorization = request.headers.get('authorization') || '';
   const apiHeader = request.headers.get('x-api-key') || '';
@@ -67,7 +60,7 @@ export async function authenticateApiKey(request: Request, requiredScope?: ApiSc
   const key = (match?.[1] || apiHeader).trim();
   if (!key) return null;
 
-  const result = await db().query(`select id,name,scopes,status from api_keys where key_hash=$1 limit 1`, [hashKey(key)]);
+  const result = await db().query(`select id,name,scopes,status,environment from api_keys where key_hash=$1 and environment=$2 limit 1`, [hashKey(key), API_KEY_ENVIRONMENT]);
   const client = result.rows[0];
 
   if (client) {
@@ -76,15 +69,6 @@ export async function authenticateApiKey(request: Request, requiredScope?: ApiSc
     if (requiredScope && !scopeAllows(scopes, requiredScope)) return null;
     // last_used_at is retained for compatibility but no longer written on every machine request.
     return { ...client, scopes };
-  }
-
-  // Keep explicitly configured machine tokens compatible with the same API
-  // contract. This is a fallback only; UI-created API keys remain authoritative.
-  if (envMachineKey(key)) {
-    const controlToken = [process.env.BILLING_API_TOKEN, process.env.MASTER_API_TOKEN, process.env.INTEGRATION_API_TOKEN].filter(Boolean).some(candidate => candidate?.trim() === key);
-    const scopes: ApiScope[] = ['license.issue', 'license.validate', 'license.manage', 'releases.read', 'releases.write', ...(controlToken ? ['releases.control' as ApiScope] : []), 'deployment.read', 'deployment.write', 'database.packages.read', 'database.packages.write', ...(controlToken ? ['database.packages.control' as ApiScope] : [])];
-    if (requiredScope && !scopeAllows(scopes, requiredScope)) return null;
-    return { name: controlToken ? 'control-machine-token' : 'environment-machine-token', scopes };
   }
 
   return null;
@@ -96,7 +80,7 @@ export async function regenerateApiKey(id: string, actorUserId: string) {
   try {
     await client.query('begin');
     const existing = (await client.query(
-      'select id,name,key_last4,status,scopes from api_keys where id=$1 for update',
+      'select id,name,key_last4,status,scopes,environment from api_keys where id=$1 for update',
       [id]
     )).rows[0];
     if (!existing || existing.status !== 'active') {
@@ -150,5 +134,5 @@ export async function deleteRevokedApiKey(id: string, actorUserId: string) {
 }
 
 export async function listApiKeys() {
-  return (await db().query(`select id,name,key_last4,scopes,status,created_at,last_used_at,revoked_at from api_keys order by created_at desc`)).rows;
+  return (await db().query(`select id,name,key_last4,scopes,status,environment,created_at,last_used_at,revoked_at from api_keys order by created_at desc`)).rows;
 }
