@@ -1,4 +1,5 @@
 import {db} from '../db';
+import {emitDiagnostic} from '../incendiary-diagnostic';
 import type {SourceFamily} from './source-vercel';
 import {configuredVercelFamily,verifyVercelAccountProjects} from './source-vercel';
 
@@ -58,15 +59,23 @@ export async function syncLicenseManagerAccountConnections(profile:SourceFamily)
  return updated;
 }
 
-async function github(path:string,token:string,method='GET',payload?:Record<string,string>){
+async function github(path:string,token:string,method='GET',payload?:Record<string,string>, profile:SourceFamily='fallback'){
+ const start=Date.now();
+ const request_id=crypto.randomUUID?.()||Math.random().toString(36).slice(2);
+ let status=0; let error:string|null=null;
  let response:Response;
  try{response=await fetch('https://api.github.com'+path,{
    method,cache:'no-store',signal:AbortSignal.timeout(12000),
    headers:{accept:'application/vnd.github+json',authorization:'Bearer '+token,
     'x-github-api-version':'2022-11-28','content-type':'application/json'},
    ...(payload?{body:JSON.stringify(payload)}:{})
- });}catch{throw new Error('GitHub connection failed during Production credential synchronization.');}
+ }); status=response.status;}catch(err){
+  error=err instanceof Error?err.message:String(err);
+  emitDiagnostic({direction:'egress',source_system:'license_manager',target:'github',account_mode:profile==='primary'?'main':'fallback',method,endpoint:path,status:0,request_id,latency_ms:Date.now()-start,error});
+  throw new Error('GitHub connection failed during Production credential synchronization.');
+ }
  if(!response.ok) {
+  emitDiagnostic({direction:'egress',source_system:'license_manager',target:'github',account_mode:profile==='primary'?'main':'fallback',method,endpoint:path,status,request_id,latency_ms:Date.now()-start,error:'HTTP '+status});
   const operation=method+' '+path.replace(/\\/g,'/');
   if(response.status===401)throw new Error(
     'GitHub 401 at '+operation+': GitHub rejected the stored account token. '+ 
@@ -77,6 +86,7 @@ async function github(path:string,token:string,method='GET',payload?:Record<stri
   throw new Error('GitHub '+response.status+' at '+operation+
     ': repository operation could not be completed.');
  }
+ emitDiagnostic({direction:'egress',source_system:'license_manager',target:'github',account_mode:profile==='primary'?'main':'fallback',method,endpoint:path,status,request_id,latency_ms:Date.now()-start,error:null});
  if(response.status===204)return {};
  try{return await response.json();}catch{throw new Error('GitHub returned an invalid response.');}
 }
