@@ -19,7 +19,7 @@ const TARGETS={
   profile:'fallback',
   githubOwner:'remipetrovich-design',
   licenseApi:'https://lm.incendiarynetworks.cc/api/v1',
-  panel:'https://orbitfs-dev-panel-fallback.vercel.app',
+  panel:'https://dev1.incendiarynetworks.cc',
   billing:'https://orbitfs-billing-fallback.vercel.app',
   base:{repo:'remipetrovich-design/OrbitFS-Base-System',ref:'base-release'},
   engine:{repo:'remipetrovich-design/OrbitFS_Engine',ref:'UPDATE_RELEASE'},
