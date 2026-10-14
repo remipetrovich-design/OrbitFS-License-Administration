@@ -6,7 +6,7 @@ const PROJECTS:Record<SourceFamily,{license:string;billing:string;panel:string}>
 };
 async function change(profile:SourceFamily,projectId:string,action:'pause'|'unpause'){
  const family=configuredVercelFamily(profile);
- const token=String((profile==='primary'?(process.env.MAIN_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN):(process.env.FALLBACK_GITHUB_TOKEN||process.env.FALLBACK_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN))||'').trim();
+ const token=String(process.env[family.tokenEnv]||'').trim();
  if(!token)throw new Error('Missing Vercel token for '+profile+' project '+projectId);
  const endpoint='https://api.vercel.com/v1/projects/'+projectId+'/'+action+'?teamId='+encodeURIComponent(family.teamId);
  const response=await fetch(endpoint,{method:'POST',cache:'no-store',
