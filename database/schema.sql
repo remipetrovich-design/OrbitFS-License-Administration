@@ -63,6 +63,7 @@ create table if not exists releases (
 );
 create table if not exists api_keys (
   id uuid primary key default gen_random_uuid(), name text not null, key_hash text unique not null, key_last4 text not null,
+  environment text check(environment in ('main','fallback')),
   scopes jsonb not null default '[]'::jsonb, status text not null default 'active' check(status in ('active','revoked')),
   created_by uuid references users(id) on delete set null, created_at timestamptz not null default now(), last_used_at timestamptz, revoked_at timestamptz, revoked_by uuid references users(id) on delete set null
 );
@@ -251,3 +252,9 @@ create table if not exists license_pulse_receipts (
 );
 create index if not exists license_pulse_receipts_pulse_idx on license_pulse_receipts(pulse_id,status);
 create index if not exists license_pulse_receipts_installation_idx on license_pulse_receipts(installation_id,updated_at desc);
+
+-- Shared database, environment-bound API credentials.
+alter table api_keys add column if not exists environment text;
+alter table api_keys drop constraint if exists api_keys_environment_check;
+alter table api_keys add constraint api_keys_environment_check check(environment in ('main','fallback'));
+create index if not exists api_keys_environment_status_idx on api_keys(environment,status);
