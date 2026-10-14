@@ -281,8 +281,8 @@ function githubCredentialCandidates(profile:GithubProfileName){
   // A GitHub account is verified only with its own account token. Never
   // silently use the Main token to authenticate a Fallback handoff.
   const names=profile==='primary'
-    ? ['ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN']
-    : ['ORBITFS_FALLBACK_GITHUB_TOKEN'];
+    ? ['MAIN_GITHUB_TOKEN','MAIN_GITHUB_RELEASE_TOKEN','ORBITFS_PRIMARY_GITHUB_TOKEN','ORBITFS_RELEASE_DISPATCH_TOKEN']
+    : ['FALLBACK_GITHUB_TOKEN','FALLBACK_GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN'];
   return names.map(name=>({name,value:String(process.env[name]||'').trim()}))
     .filter(item=>Boolean(item.value));
 }
