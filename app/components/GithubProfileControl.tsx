@@ -1,5 +1,5 @@
 'use client';
-import {useActionState,useState} from 'react';
+import {useActionState,useEffect,useRef,useState,startTransition} from 'react';
 import {useFormStatus} from 'react-dom';
 
 type GithubProfile='primary'|'fallback';
@@ -37,9 +37,9 @@ function ModeLever({profile,enabled,targetLabel}:{profile:GithubProfile;enabled:
  return <button type="submit"
    className={`github-mode-lever ${profile==='fallback'?'points-down':'points-up'}`}
    disabled={!enabled||pending}
-   aria-label={pending?'Switching source mode…':enabled?`Switch source mode to ${targetLabel}`:'Enable Maintenance / Handover Mode or turn Master Authority OFF, then tick the acknowledgment checkbox'}
+   aria-label={pending?'Switching source mode…':enabled?`Switch source mode to ${targetLabel}`:'Tick the acknowledgment checkbox to switch source mode'}
    aria-disabled={!enabled||pending}
-   title={!enabled?'Enable Maintenance / Handover Mode (or Master OFF) and tick the checkbox before switching':`Switch to ${targetLabel}`}
+   title={!enabled?'Tick the checkbox before switching':`Switch to ${targetLabel}`}
   ><span className="github-mode-lever-slot"/><span className="github-mode-lever-stick"/><span className="github-mode-lever-cap"/></button>;
 }
 
@@ -69,10 +69,22 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
   void prepareFallbackAction().then(result=>setPrepareResult(result)).catch(()=>setPrepareResult({status:'error',message:'Fallback preparation request failed. No source switch was performed.'})).finally(()=>setPreparing(false));
  };
  const [result,formAction,isPending]=useActionState<SourceSwitchResult,FormData>(action,{status:'idle',message:''});
+ const handoverForm=useRef<HTMLFormElement>(null);
+ const retryCount=useRef(0);
+ useEffect(()=>{
+  if(result.status!=='preparing'||!acknowledged||!handoverForm.current)return;
+  if(retryCount.current>=40)return;
+  const timer=setTimeout(()=>{
+   if(!handoverForm.current)return;
+   retryCount.current++;
+   startTransition(()=>formAction(new FormData(handoverForm.current!)));
+  },15000);
+  return ()=>clearTimeout(timer);
+ },[result,isPending,acknowledged,formAction]);
  const target:GithubProfile=profile==='primary'?'fallback':'primary';
  const activeLabel=profile==='primary'?'MAIN':'FALLBACK';
  const targetLabel=target==='primary'?'MAIN':'FALLBACK';
- const canSwitch=canManage&&handoverReady&&acknowledged&&!isPending&&missingRequirements.length===0;
+ const canSwitch=canManage&&handoverReady&&acknowledged&&!isPending;
 
  return <section className="github-mode-panel" aria-label="Main and fallback source mode">
    <span className="authority-hardware-screw screw-tl" aria-hidden="true"/>
@@ -85,9 +97,9 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
       <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged and automatically provisions GitHub/Vercel account credentials and queues the selected service deployments. Domain routing is checked separately.</p>
     </div><div className={`github-mode-status ${handoverReady?'ready':'blocked'}`}>
       <strong>{handoverReady?'HANDOVER READY':'SWITCH LOCKED'}</strong>
-      <small>{handoverReady?'Tick the checkbox to unlock the lever':'Turn Master ON and enable Maintenance / Handover Mode'}</small>
+      <small>{handoverReady?'Tick the checkbox to unlock the lever':'Owner confirmation required'}</small>
     </div></div>
-    <form action={formAction}>
+    <form ref={handoverForm} action={formAction}>
      <input type="hidden" name="profile" value={target}/>
      <input type="hidden" name="expected_profile" value={profile}/>
      <div className="github-mode-console">
@@ -125,7 +137,7 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
        <p>These are server-side preflight credentials. They can use your existing account tokens; the two GitHub/Vercel families must remain separate.</p>
      </div>}
      {result.status==='preparing'&&<p role="status" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
-       <strong>Preparing {targetLabel}.</strong> {result.message} Use the lever again once the destination deployments are ready.
+       <strong>Preparing {targetLabel}.</strong> {result.message} The switch completes automatically after destination deployments pass verification while this page remains open.
      </p>}
      {result.status==='error'&&<p role="alert" style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #dc5555',borderRadius:8,background:'rgba(239,68,68,.12)',fontSize:12}}>
        <strong>Switch not completed.</strong> {result.message} The active mode was not changed by this failed request.
@@ -135,13 +147,13 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
        <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!handoverReady}
          onChange={event=>setAcknowledged(event.target.checked)} required/>
        <span><strong>I understand this switches production source authority to {targetLabel}.</strong>
-        <small>Master ON with Maintenance / Handover Mode is required. GitHub repositories and deployment workflows are checked before switching.
+        <small>GitHub repositories and deployment workflows are verified before switching.
         Both Vercel accounts keep their own projects; this action requests the target deployments but never migrates a database.</small>
        </span>
      </label>}
      <div className="github-mode-footer">
       <strong>ACTIVE: {activeLabel}</strong>
-      <span>{handoverReady?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Enable Maintenance / Handover Mode to unlock the switch'}</span>
+      <span>{handoverReady?(acknowledged?`Lever ready → ${targetLabel}`:'Tick the checkbox, then move the lever'):'Tick the acknowledgment checkbox to unlock the switch'}</span>
      </div>
     </form>
     {profile==='primary'&&canManage&&<div style={{padding:'12px 14px',margin:'12px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
