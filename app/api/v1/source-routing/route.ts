@@ -59,7 +59,8 @@ function familyReadiness(profile:'primary'|'fallback'){
   if(cached&&cached.until>Date.now())return cached.promise;
   const family=configuredVercelFamily(profile);
   const destinations=profile==='fallback'?FALLBACK_DESTINATIONS:PRIMARY_DESTINATIONS;
-  // Use the selected Vercel account credential for deployment readiness.
+  // Vercel deployment discovery requires the selected family's Vercel API token,
+  // not a GitHub PAT. Never cross account boundaries for readiness checks.
   const token=String(process.env[family.tokenEnv]||'').trim();
   const promise=Promise.all([
     isReady(destinations.panel.projectId,token,family.teamId),
