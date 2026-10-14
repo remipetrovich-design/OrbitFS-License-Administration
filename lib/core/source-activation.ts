@@ -17,8 +17,7 @@ const WORKFLOWS:Record<SourceFamily,Service[]>={
 };
 
 function credentials(profile:SourceFamily){
- const github=String(process.env[profile==='primary'?'ORBITFS_PRIMARY_GITHUB_TOKEN':'ORBITFS_FALLBACK_GITHUB_TOKEN']||
-  (profile==='primary'?process.env.ORBITFS_RELEASE_DISPATCH_TOKEN:'')||'').trim();
+ const github=String((profile==='primary'?(process.env.MAIN_GITHUB_TOKEN||process.env.MAIN_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_PRIMARY_GITHUB_TOKEN||process.env.ORBITFS_RELEASE_DISPATCH_TOKEN):(process.env.FALLBACK_GITHUB_TOKEN||process.env.FALLBACK_GITHUB_RELEASE_TOKEN||process.env.ORBITFS_FALLBACK_GITHUB_TOKEN))||'').trim();
  const vercel=String(process.env[configuredVercelFamily(profile).tokenEnv]||'').trim();
  if(!github||!vercel||/^(change-me|replace-with|placeholder|your-)/i.test(github)||/^(change-me|replace-with|placeholder|your-)/i.test(vercel))
   throw new Error('The active account GitHub/Vercel connection tokens are missing. Set the matching ORBITFS account tokens in License Manager Production.');
