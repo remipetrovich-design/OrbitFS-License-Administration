@@ -63,5 +63,6 @@ test('owner can prepare standby Fallback while MAIN remains active, without depl
  assert.match(ui,/user\.role!=='owner'/);
  assert.match(ui,/prepareFallbackAction=\{prepareFallbackConnections\}/);
  assert.match(control,/Prepare Fallback GitHub connections/);
- assert.match(control,/disabled=\{!masterOffline\|\|preparing\}/);
+ assert.match(ui,/allowPreparation=\{!masterEnabled\|\|maintenance\}/);
+ assert.match(control,/disabled=\{!allowPreparation\|\|preparing\}/);
 });
