@@ -4,11 +4,9 @@ import type { NextRequest } from 'next/server';
 // Deployed family is immutable; the shared License Manager database selects
 // exactly one active family. Standby is NOT a second public operational API.
 const DEPLOYED_FAMILY = 'fallback';
-const API_HOST = 'lm.incendiarynetworks.cc';
 const DISCOVERY = '/api/v1/source-configuration';
 
 export async function middleware(request: NextRequest) {
-  const host = request.nextUrl.hostname.toLowerCase();
   const pathname = request.nextUrl.pathname;
 
   // This read-only route is essential for starting the alternate system.
@@ -63,16 +61,8 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (host === API_HOST) {
-    if (pathname === '/') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/api/v1/license/health';
-      return NextResponse.rewrite(url);
-    }
-    if (!pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'API_HOST_ONLY', service: 'license-manager-api' }, { status: 404 });
-    }
-  }
+  // The same public host serves the authenticated admin UI and /api/v1/* API.
+  // Source-family and handover restrictions above remain authoritative.
   return NextResponse.next();
 }
 
