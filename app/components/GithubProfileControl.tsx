@@ -94,7 +94,7 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
    <div className="github-mode-inner">
     <div className="github-mode-heading"><div>
       <span>ORBITFS SOURCE AUTHORITY</span><h2>MAIN / FALLBACK</h2>
-      <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged, checks the selected services without deploying, and pauses the three previous Vercel projects only after source cutover (License Manager last). Domain routing is checked separately.</p>
+      <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged, checks the selected services without deploying, and pauses the three previous Vercel projects after confirming the global source-change pulse (License Manager last). Customer acknowledgment is not required.</p>
     </div><div className={`github-mode-status ${handoverReady?'ready':'blocked'}`}>
       <strong>{handoverReady?'HANDOVER READY':'SWITCH LOCKED'}</strong>
       <small>{handoverReady?'Tick the checkbox to unlock the lever':'Owner confirmation required'}</small>
@@ -123,7 +123,7 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
      {handover&&handover.revision!==null&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #6b7280',borderRadius:8,fontSize:12}}>
        <strong>Handover revision #{handover.revision}: {handover.stage.replaceAll('_',' ')}</strong>
        <p>Runtime receipts: {handover.applied} applied · {handover.received} received · {handover.failed} failed.</p>
-       <small>Source mode is {handover.mode.toUpperCase()}. Previous-mode shutdown remains locked until installation routing is independently verified.</small>
+       <small>Source mode is {handover.mode.toUpperCase()}. Previous-project shutdown requires only confirmed global source-change pulse publication; customer acknowledgments are informational.</small>
      </div>}
      {serviceStatus&&<div role="status" style={{padding:'10px 12px',margin:'10px 0',border:'1px solid #e1a72e',borderRadius:8,fontSize:12}}>
        <strong>Production service activation: {serviceStatus.status.toUpperCase()}</strong>

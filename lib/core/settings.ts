@@ -371,25 +371,28 @@ async function verifyVercelWorkflowTargets(profile:GithubProfileName){
 }
 
 
-/** Post-commit shutdown: no deployment or database migration is dispatched.
+/** Post-commit shutdown requires confirmed global source-change pulse publication.
+ * No customer acknowledgment, routing attestation or production deployment is needed.
  * A Vercel failure leaves the new source authority selected and is reported.
  */
 async function shutdownPreviousSourceAfterCutover(
  next:GithubProfileName,previous:GithubProfileName,
  revision:number,actorUserId:string|null,actor:string
 ){
- const selected=await inspectSourceDeployments(next);
- if(!selected.allReady)
-  throw new Error('Selected source services are no longer healthy; previous services remain available.');
- const url=next==='primary'
-  ?'https://incendiarynetworks.cc/api/v1/source-configuration'
-  :'https://lm.incendiarynetworks.cc/api/v1/source-configuration';
- const response=await fetch(url,{cache:'no-store',redirect:'manual',signal:AbortSignal.timeout(8000)});
- if(!response.ok)
-  throw new Error('Selected License Manager source API is unavailable (HTTP '+response.status+'); previous services remain available.');
- const configuration=await response.json() as {mode?:string};
- if(configuration.mode!==(next==='primary'?'main':'fallback'))
-  throw new Error('Selected License Manager has not confirmed new source mode; previous services remain available.');
+ // Destination health is already verified before committing the mode change.
+ // Confirm the source-change pulse is durably published for client polling;
+ // customer receipts and separate routing attestations are not required.
+ const pulse=(await db().query(
+  `select id from license_pulses
+   where revision=$1 and action='refresh_authority' and scope='global'
+    and reason='source-mode-changed'
+    and payload->>'source'='github-profile-switch'
+    and payload->>'from'=$2 and payload->>'to'=$3
+   limit 1`,
+  [revision,previous,next]
+ )).rows[0];
+ if(!pulse?.id)
+  throw new Error('Source-change pulse publication could not be confirmed. Previous projects remain available.');
  const assertSelectedAuthority=async()=>{
   const current=(await db().query('select github_profile from system_settings where id=true')).rows[0];
   if(String(current?.github_profile)!==next)
@@ -506,7 +509,8 @@ export async function setGithubProfile(
     );
     await client.query('commit');
     handoverCommitted=true;
-    // Verify the selected authority after commit, then pause the old family.
+    // Verify global source-change pulse publication, then pause the old family.
+    // Customer delivery receipts and separate routing attestations are not required.
     // A partial shutdown never rolls the authoritative DB mode back.
     let paused:string[]=[];
     let failed:string[]=[];
@@ -565,16 +569,22 @@ export async function getSourceHandoverStatus(){
  )).rows;
  const pausedProjects=pausedRows.map((row:any)=>String(row.project_id||'')).filter(Boolean);
  const complete=pausedProjects.length===3;
+ const pulsePublished=Boolean(result.id)&&
+  result.payload?.source==='github-profile-switch'&&
+  result.payload?.to===(mode==='main'?'primary':'fallback');
  return {
   mode,revision:Number(result.revision),startedAt:result.created_at,
-  stage:complete?'previous_paused':failed?'runtime_failed':applied?'runtime_acknowledged':'awaiting_runtime_ack',
-  received,applied,failed,
+  stage:complete?'previous_paused':pulsePublished?'pulse_published':'pulse_unconfirmed',
+  received,applied,failed,pulsePublished,
   previousShutdown:{complete,pausedProjects},
-  // Customer routing cannot be inferred from pulse receipts or Vercel responses.
-  confirmed:false,shutdownAllowed:false,
+  // Published means the directive is available for polling; delivery is
+  // not guaranteed and runtime receipts are informational.
+  confirmed:pulsePublished,shutdownAllowed:pulsePublished,
   reason:complete
-   ?'Previous Vercel projects paused. Customer routing requires separate verification.'
-   :'Previous-project shutdown incomplete or pending; pulse receipts are not route attestations.'
+   ?'Source-change pulse published and previous Vercel projects paused.'
+   :pulsePublished
+    ?'Source-change pulse published. Customer acknowledgments are not required for previous-project shutdown.'
+    :'Source-change pulse not confirmed; previous projects must remain available.'
  };
 }
 

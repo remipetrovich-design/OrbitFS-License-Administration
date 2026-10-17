@@ -71,8 +71,9 @@ test('committed switch verifies authority, pauses prior Vercel family and audits
  const pause=readFileSync('lib/core/source-pause.ts','utf8');
  const method=settings.slice(settings.indexOf('export async function setGithubProfile('),settings.indexOf('export async function getSourceHandoverStatus('));
  assert.match(settings,/shutdownPreviousSourceAfterCutover/);
- assert.match(settings,/configuration\.mode!==/);
- assert.match(settings,/selected\.allReady/);
+ assert.match(settings,/Source-change pulse publication could not be confirmed/);
+ assert.match(settings,/payload->>'from'=\$2 and payload->>'to'=\$3/);
+ assert.match(settings,/destination\.allReady/);
  assert.match(method,/await client\.query\('commit'\);[\s\S]*handoverCommitted=true;[\s\S]*await shutdownPreviousSourceAfterCutover\(next,actual,/);
  assert.match(method,/pendingPreviousShutdown:failed\.length>0/);
  assert.match(pause,/for\(const id of \[p\.billing,p\.panel,p\.license\]\)/);
@@ -80,4 +81,18 @@ test('committed switch verifies authority, pauses prior Vercel family and audits
  assert.match(pause,/await record\(id,'paused'\)/);
  assert.match(settings,/github_profile\.previous_project_paused/);
  assert.doesNotMatch(method,/dispatchSourceProductionDeployments\(/);
+});
+
+test('global pulse publication replaces customer-routing attestation as shutdown gate',()=>{
+ const shutdown=settings.slice(settings.indexOf('async function shutdownPreviousSourceAfterCutover('),settings.indexOf('export async function setGithubProfile('));
+ assert.match(shutdown,/select id from license_pulses/);
+ assert.match(shutdown,/revision=\$1 and action='refresh_authority' and scope='global'/);
+ assert.match(shutdown,/reason='source-mode-changed'/);
+ assert.match(shutdown,/payload->>'source'='github-profile-switch'/);
+ assert.match(shutdown,/payload->>'from'=\$2 and payload->>'to'=\$3/);
+ assert.match(shutdown,/if\(!pulse\?\.id\)/);
+ assert.match(shutdown,/pausePreviousSourceServices\(previous,/);
+ assert.doesNotMatch(shutdown,/fetch\(|inspectSourceDeployments\(/);
+ assert.match(settings,/confirmed:pulsePublished,shutdownAllowed:pulsePublished/);
+ assert.doesNotMatch(control,/shutdown remains locked until installation routing/);
 });
