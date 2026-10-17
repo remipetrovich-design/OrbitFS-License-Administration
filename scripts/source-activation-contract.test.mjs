@@ -28,14 +28,15 @@ test('github action secret is sealed and only server-side, never plaintext in Gi
  assert.doesNotMatch(source,/git\/contents.*VERCEL_TOKEN/);
  assert.doesNotMatch(source,/console\.log\([^)]*(?:github|vercel|token)/i);
 });
-test('switch synchronizes credential before commit, dispatches only after mode update',()=>{
+test('switch validates standby and syncs credentials before commit, without automatic deployment',()=>{
  const method=settings.slice(settings.indexOf('export async function setGithubProfile('),settings.indexOf('export async function updateRuntimePolicy('));
  const iCredential=method.indexOf('syncSourceGitHubCredentials(next)');
+ const iReadiness=method.indexOf('inspectSourceDeployments(next)');
  const iCommit=method.indexOf("await client.query('commit')");
- const iDispatch=method.indexOf('dispatchSourceProductionDeployments(next)');
- assert.ok(iCredential>0&&iCredential<iCommit&&iCommit<iDispatch);
- assert.match(method,/Master Authority must be OFF/);
- assert.match(method,/database_changes:false/);
+ assert.ok(iCredential>0&&iCredential<iReadiness&&iReadiness<iCommit);
+ assert.match(method,/if\(!destination\.allReady\)/);
+ assert.match(method,/database_changes:false,deployments_triggered:false/);
+ assert.doesNotMatch(method,/dispatchSourceProductionDeployments\(/);
 });
 test('owner-only self-heal and truthful incomplete routing status',()=>{
  assert.match(ui,/user\.role!=='owner'/);
@@ -47,7 +48,8 @@ test('owner-only self-heal and truthful incomplete routing status',()=>{
 
 test('owner can prepare standby Fallback while MAIN remains active, without deployment or mode switch',()=>{
  const prepare=source.slice(source.indexOf('export async function prepareFallbackGithubProduction('),source.indexOf('async function latestReadyDeployment('));
- assert.match(prepare,/select system_enabled,github_profile from system_settings/);
+ assert.match(prepare,/select system_enabled,maintenance_mode,github_profile from system_settings/);
+ assert.match(prepare,/Boolean\(state\?\.system_enabled\)\&\&!Boolean\(state\?\.maintenance_mode\)/);
  assert.match(prepare,/Boolean\(state\?\.system_enabled\)/);
  assert.match(prepare,/String\(state\?\.github_profile\)!=='primary'/);
  assert.match(prepare,/identity\.login/);
