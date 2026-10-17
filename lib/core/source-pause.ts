@@ -32,13 +32,29 @@ export async function restoreResumedSourceServices(profile:SourceFamily,resumed:
  }
  return errors;
 }
-export async function pausePreviousSourceServices(profile:SourceFamily){
+export type PreviousSourcePauseResult={paused:string[];failed:string[]};
+export async function pausePreviousSourceServices(
+ profile:SourceFamily,
+ assertSelectedAuthority:()=>Promise<void>,
+ record:(projectId:string,state:'paused'|'failed',reason?:string)=>Promise<void>,
+ previouslyPaused:readonly string[]=[]
+):Promise<PreviousSourcePauseResult>{
  const p=PROJECTS[profile];
- // The old License Manager is always the final project taken offline.
- const failures:string[]=[];
+ const paused=[...previouslyPaused],failed:string[]=[];
+ // Pause old Billing and Control Centre first. The old License Manager is last.
  for(const id of [p.billing,p.panel,p.license]){
-  try{await change(profile,id,'pause');}
-  catch(error){failures.push(id+': '+(error instanceof Error?error.message:String(error)));}
+  if(paused.includes(id))continue;
+  let reason:string|undefined;
+  try{await assertSelectedAuthority();await change(profile,id,'pause');}
+  catch(error){reason=error instanceof Error?error.message:String(error);}
+  if(reason){
+   failed.push(id+': '+reason);
+   await record(id,'failed',reason);
+   break;
+  }
+  paused.push(id);
+  // Persist each receipt before continuing, so retries can skip successes.
+  await record(id,'paused');
  }
- if(failures.length)throw new Error('Previous source pause incomplete: '+failures.join('; '));
+ return {paused,failed};
 }

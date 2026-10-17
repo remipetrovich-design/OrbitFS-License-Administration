@@ -1,6 +1,7 @@
 /** Vercel account validation for MAIN / FALLBACK source selection.
  * Both sets of projects remain deployed to their own Vercel accounts.
- * A switch only selects which already-configured release workflows are active.
+ * Switching verifies the selected production services and pauses the previous
+ * Vercel project family. It never dispatches production deployments.
  */
 export type SourceFamily='primary'|'fallback';
 type VercelProject = {id:string;name:string;accountId:string};

@@ -1,4 +1,4 @@
-import {resumeSourceServices,restoreResumedSourceServices} from './source-pause';
+import {resumeSourceServices,restoreResumedSourceServices,pausePreviousSourceServices} from './source-pause';
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
 import {syncSourceGitHubCredentials,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
@@ -370,6 +370,47 @@ async function verifyVercelWorkflowTargets(profile:GithubProfileName){
  return checked;
 }
 
+
+/** Post-commit shutdown: no deployment or database migration is dispatched.
+ * A Vercel failure leaves the new source authority selected and is reported.
+ */
+async function shutdownPreviousSourceAfterCutover(
+ next:GithubProfileName,previous:GithubProfileName,
+ revision:number,actorUserId:string|null,actor:string
+){
+ const selected=await inspectSourceDeployments(next);
+ if(!selected.allReady)
+  throw new Error('Selected source services are no longer healthy; previous services remain available.');
+ const url=next==='primary'
+  ?'https://incendiarynetworks.cc/api/v1/source-configuration'
+  :'https://lm.incendiarynetworks.cc/api/v1/source-configuration';
+ const response=await fetch(url,{cache:'no-store',redirect:'manual',signal:AbortSignal.timeout(8000)});
+ if(!response.ok)
+  throw new Error('Selected License Manager source API is unavailable (HTTP '+response.status+'); previous services remain available.');
+ const configuration=await response.json() as {mode?:string};
+ if(configuration.mode!==(next==='primary'?'main':'fallback'))
+  throw new Error('Selected License Manager has not confirmed new source mode; previous services remain available.');
+ const assertSelectedAuthority=async()=>{
+  const current=(await db().query('select github_profile from system_settings where id=true')).rows[0];
+  if(String(current?.github_profile)!==next)
+   throw new Error('Source authority changed during previous-project shutdown. Stopped safely.');
+ };
+ await assertSelectedAuthority();
+ const previouslyPaused=(await db().query(
+  `select distinct details->>'project_id' as project_id from audit_events
+   where action='github_profile.previous_project_paused' and details->>'revision'=$1`,
+  [String(revision)]
+ )).rows.map((row:any)=>String(row.project_id||'')).filter(Boolean);
+ return pausePreviousSourceServices(previous,assertSelectedAuthority,async(projectId,state,reason)=>{
+  await db().query(
+   `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+    values($1,$2,$3,'vercel_project',$4,$5)`,
+   [actorUserId,actor,state==='paused'?'github_profile.previous_project_paused':'github_profile.previous_project_pause_failed',
+    projectId,JSON.stringify({revision,from:previous,to:next,project_id:projectId,reason:reason||null,deployments_triggered:false})]
+  );
+ },previouslyPaused);
+}
+
 export async function setGithubProfile(
   next:GithubProfileName,
   expected:GithubProfileName,
@@ -465,12 +506,24 @@ export async function setGithubProfile(
     );
     await client.query('commit');
     handoverCommitted=true;
-    // Authority is selected, but installed customers may still be polling the
-    // previous API. A receipt cannot authenticate deployment routing, so do
-    // not terminate the previous family as part of this transaction.
-    // The owner must complete independent routing attestation before shutdown.
+    // Verify the selected authority after commit, then pause the old family.
+    // A partial shutdown never rolls the authoritative DB mode back.
+    let paused:string[]=[];
+    let failed:string[]=[];
+    try{
+      const result=await shutdownPreviousSourceAfterCutover(next,actual,Number(updated.pulse_revision),actorUserId,actor);
+      paused=result.paused;
+      failed=result.failed;
+    }catch(error){
+      failed=[error instanceof Error?error.message:String(error)];
+      await db().query(
+       `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
+        values($1,$2,'github_profile.previous_shutdown_incomplete','system_settings','github_profile',$3)`,
+       [actorUserId,actor,JSON.stringify({revision:Number(updated.pulse_revision),from:actual,to:next,reason:failed[0]})]
+      ).catch(()=>{});
+    }
     return {...updated,sourceActivation:{
-      queued:[],failed:[],pendingPreviousShutdown:true,
+      queued:[],failed,paused,pendingPreviousShutdown:failed.length>0,
       pulseRevision:Number(updated.pulse_revision)
     }};
 
@@ -505,15 +558,23 @@ export async function getSourceHandoverStatus(){
  )).rows;
  const counts=Object.fromEntries(receipts.map((row:any)=>[String(row.status),Number(row.count)]));
  const applied=counts.applied||0,failed=counts.failed||0,received=counts.received||0;
+ const pausedRows=(await db().query(
+  `select distinct details->>'project_id' as project_id from audit_events
+   where action='github_profile.previous_project_paused' and details->>'revision'=$1`,
+  [String(result.revision)]
+ )).rows;
+ const pausedProjects=pausedRows.map((row:any)=>String(row.project_id||'')).filter(Boolean);
+ const complete=pausedProjects.length===3;
  return {
   mode,revision:Number(result.revision),startedAt:result.created_at,
-  stage:failed?'runtime_failed':applied?'runtime_acknowledged':'awaiting_runtime_ack',
+  stage:complete?'previous_paused':failed?'runtime_failed':applied?'runtime_acknowledged':'awaiting_runtime_ack',
   received,applied,failed,
-  // This is observable receipt state, not proof of both Base and Engine
-  // changing API provider or evidence that old services may be disabled.
-  confirmed:false,
-  shutdownAllowed:false,
-  reason:'Pulse receipts are not authenticated deployment-attestation records.'
+  previousShutdown:{complete,pausedProjects},
+  // Customer routing cannot be inferred from pulse receipts or Vercel responses.
+  confirmed:false,shutdownAllowed:false,
+  reason:complete
+   ?'Previous Vercel projects paused. Customer routing requires separate verification.'
+   :'Previous-project shutdown incomplete or pending; pulse receipts are not route attestations.'
  };
 }
 

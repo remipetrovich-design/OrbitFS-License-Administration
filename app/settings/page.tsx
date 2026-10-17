@@ -54,8 +54,9 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
  try{
   const switched=await setGithubProfile(next,expected,acknowledged,user.id,user.email);
   if(switched.sourceActivation?.failed?.length)return {
-   status:'success',message:'Source mode changed, but pausing the previous production projects failed: '+switched.sourceActivation.failed.join('; ')+
-    '. The destination is active, but the previous projects require manual pause reconciliation.'
+   status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
+    ', but the previous-project shutdown is INCOMPLETE: '+switched.sourceActivation.failed.join('; ')+
+    '. The new mode remains active; inspect pause audit receipts and reconcile remaining old Vercel projects.'
   };
  }catch(error){
   // A staged destination is not a failed mode change: the original mode is
@@ -66,7 +67,7 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
  }
  revalidatePath('/settings');revalidatePath('/');
  return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
-  '. Destination deployments passed readiness checks and a source-change pulse was published. The previous projects remain online until external Base/Engine routing is independently verified. API activation and previous-mode shutdown remain manual.'};
+  '. Destination services and API passed readiness checks; a source-change pulse was published, and all three previous Vercel projects were paused (License Manager last). No production deployment was triggered.'};
 }
 
 async function prepareFallbackConnections():Promise<{status:'success'|'error';message:string}>{

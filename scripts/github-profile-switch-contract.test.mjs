@@ -66,3 +66,18 @@ test('page names both prerequisite credentials and prevents an invalid target cl
  assert.doesNotMatch(control,/missingRequirements\.length===0/);
  assert.match(control,/MAIN License Manager/);
 });
+
+test('committed switch verifies authority, pauses prior Vercel family and audits partial failures',()=>{
+ const pause=readFileSync('lib/core/source-pause.ts','utf8');
+ const method=settings.slice(settings.indexOf('export async function setGithubProfile('),settings.indexOf('export async function getSourceHandoverStatus('));
+ assert.match(settings,/shutdownPreviousSourceAfterCutover/);
+ assert.match(settings,/configuration\.mode!==/);
+ assert.match(settings,/selected\.allReady/);
+ assert.match(method,/await client\.query\('commit'\);[\s\S]*handoverCommitted=true;[\s\S]*await shutdownPreviousSourceAfterCutover\(next,actual,/);
+ assert.match(method,/pendingPreviousShutdown:failed\.length>0/);
+ assert.match(pause,/for\(const id of \[p\.billing,p\.panel,p\.license\]\)/);
+ assert.match(pause,/await assertSelectedAuthority\(\)/);
+ assert.match(pause,/await record\(id,'paused'\)/);
+ assert.match(settings,/github_profile\.previous_project_paused/);
+ assert.doesNotMatch(method,/dispatchSourceProductionDeployments\(/);
+});

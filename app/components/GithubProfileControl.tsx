@@ -94,7 +94,7 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
    <div className="github-mode-inner">
     <div className="github-mode-heading"><div>
       <span>ORBITFS SOURCE AUTHORITY</span><h2>MAIN / FALLBACK</h2>
-      <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged and automatically provisions GitHub/Vercel account credentials and queues the selected service deployments. Domain routing is checked separately.</p>
+      <p>License Manager selects the active GitHub and Vercel account family. The switch keeps the shared database unchanged, checks the selected services without deploying, and pauses the three previous Vercel projects only after source cutover (License Manager last). Domain routing is checked separately.</p>
     </div><div className={`github-mode-status ${handoverReady?'ready':'blocked'}`}>
       <strong>{handoverReady?'HANDOVER READY':'SWITCH LOCKED'}</strong>
       <small>{handoverReady?'Tick the checkbox to unlock the lever':'Owner confirmation required'}</small>
@@ -147,8 +147,8 @@ export default function GithubProfileControl({profile,handoverReady,allowPrepara
        <input type="checkbox" name="acknowledged" checked={acknowledged} disabled={!handoverReady}
          onChange={event=>setAcknowledged(event.target.checked)} required/>
        <span><strong>I understand this switches production source authority to {targetLabel}.</strong>
-        <small>GitHub repositories and deployment workflows are verified before switching.
-        Both Vercel accounts keep their own projects; this action requests the target deployments but never migrates a database.</small>
+        <small>GitHub repositories and destinations are verified before switching.
+        This explicitly authorizes pausing all three previously active Vercel projects after the selected License Manager confirms the new mode. No production deployment, migration or repository synchronization is triggered.</small>
        </span>
      </label>}
      <div className="github-mode-footer">
