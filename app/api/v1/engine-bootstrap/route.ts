@@ -39,7 +39,7 @@ function componentFor(path: string) {
   for (const component of COMPONENTS) if (path.startsWith('src/addons/' + component + '/')) return component;
   return 'shared';
 }
-function githubToken(source:{tokenEnv:string}) {
+function githubToken(source:{repo:string;tokenEnv:string}) {
   const fallback=source.repo.startsWith('remipetrovich-design/');
   const names=fallback
     ? ['FALLBACK_GITHUB_TOKEN','FALLBACK_GITHUB_RELEASE_TOKEN','ORBITFS_FALLBACK_GITHUB_TOKEN']
