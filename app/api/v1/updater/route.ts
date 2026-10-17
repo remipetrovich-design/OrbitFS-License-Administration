@@ -60,14 +60,14 @@ export async function GET(request:Request){
     if(String(release.release_type)!==type)return NextResponse.json({ok:false,code:'RELEASE_TYPE_MISMATCH'},{status:409});
 
     const manifest=release.manifest&&typeof release.manifest==='object'?release.manifest:{};
-    const releaseComponents:string[]=[...new Set<string>((Array.isArray(manifest.components)?manifest.components:[]).map((x:any)=>String(x||'').trim().toLowerCase()).filter((x:string)=>['base','apex','mcp','studio'].includes(x)))];
+    const releaseComponents:string[]=[...new Set<string>((Array.isArray(manifest.components)?manifest.components:[]).map((x:any)=>String(x||'').trim().toLowerCase()).filter((x:string)=>['base','engine-shared','apex','mcp','studio'].includes(x)))];
     // The published Update remains a complete shared artifact. License Manager
     // returns a per-installation execution plan so the runtime applies only
     // components this exact licence is entitled to use.
     const validationResult:any=validation;
     const runtimeStates=validationResult.components&&typeof validationResult.components==='object'?validationResult.components:{};
-    const entitledComponents:string[]=['base','apex','mcp','studio'].filter((component:string)=>{
-      const state=(runtimeStates as any)['orbitfs_'+component];
+    const entitledComponents:string[]=['base','engine-shared','apex','mcp','studio'].filter((component:string)=>{
+      const state=(runtimeStates as any)[component==='engine-shared'?'orbitfs_base':'orbitfs_'+component];
       return Boolean(state?.allowed);
     });
     const executionComponents=release.release_type==='update'

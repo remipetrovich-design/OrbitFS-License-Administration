@@ -1,7 +1,7 @@
-import {resumeSourceServices} from './source-pause';
+import {resumeSourceServices,restoreResumedSourceServices} from './source-pause';
 import { db } from '../db';
 import {verifyVercelAccountProjects} from './source-vercel';
-import {syncSourceGitHubCredentials,dispatchSourceProductionDeployments,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
+import {syncSourceGitHubCredentials,syncLicenseManagerAccountConnections,inspectSourceDeployments} from './source-activation';
 
 export type SettingField='system_enabled'|'licensing_enabled'|'maintenance_mode'|'customer_self_unlock_enabled'|'release_system_enabled'|'auto_technical_approval_enabled'|'deployment_enabled'|'base_deployment_enabled'|'update_deployment_enabled'|'rollback_enabled';
 export type GithubProfileName='primary'|'fallback';
@@ -191,11 +191,15 @@ export async function acknowledgePulse(input:{
        license_id=coalesce(excluded.license_id,license_pulse_receipts.license_id),
        client=coalesce(excluded.client,license_pulse_receipts.client),
        client_version=coalesce(excluded.client_version,license_pulse_receipts.client_version),
-       status=excluded.status,
-       result_code=excluded.result_code,
-       error=excluded.error,
-       resulting_license_state=excluded.resulting_license_state,
-       resulting_revision=excluded.resulting_revision,
+       status=case
+         when license_pulse_receipts.status in ('applied','failed') and excluded.status='received'
+           then license_pulse_receipts.status
+         else excluded.status end,
+       result_code=case when excluded.status='received' and license_pulse_receipts.status in ('applied','failed')
+         then license_pulse_receipts.result_code else excluded.result_code end,
+       error=case when excluded.status='received' and license_pulse_receipts.status in ('applied','failed') then license_pulse_receipts.error else excluded.error end,
+       resulting_license_state=case when excluded.status='received' and license_pulse_receipts.status in ('applied','failed') then license_pulse_receipts.resulting_license_state else excluded.resulting_license_state end,
+       resulting_revision=case when excluded.status='received' and license_pulse_receipts.status in ('applied','failed') then license_pulse_receipts.resulting_revision else excluded.resulting_revision end,
        details=license_pulse_receipts.details||excluded.details,
        applied_at=case when excluded.status in ('applied','failed') then now() else license_pulse_receipts.applied_at end,
        updated_at=now()
@@ -396,28 +400,23 @@ export async function setGithubProfile(
   // Stage the destination while keeping the old family authoritative. A
   // deployment dispatch is not proof of readiness and must never flip mode.
   // A paused destination must be resumed before its fresh deployment can be checked.
-  await resumeSourceServices(next);
+  const resumed:string[]=[];
+  let handoverCommitted=false;
+  // An unsuccessful handover must not leave newly resumed standby services
+  // exposed. Track partial success even when Vercel rejects later projects.
+  try{
+    await resumeSourceServices(next,resumed);
   const destination=await inspectSourceDeployments(next);
   if(!destination.allReady){
-    const absent=destination.services.filter(service=>!service.ready).map(service=>service.repo);
-    const licenseRepo=next==='fallback'
-      ?'remipetrovich-design/OrbitFS-License-Administration'
-      :'lucaskerim123/Custom-licence-manager';
-    const stage=absent.includes(licenseRepo)?'license-manager':'other-services';
-    const required=stage==='license-manager'?[licenseRepo]:absent;
-    const recent=(await db().query(
-      "select 1 from audit_events where action='github_profile.handover_preparing' and details->>'from'=$1 and details->>'to'=$2 and details->>'stage'=$3 and created_at>now()-interval '10 minutes' limit 1",
-      [expected,next,stage]
-    )).rowCount;
-    if(recent)throw new Error('Destination services are being prepared: '+absent.join(', ')+'. Waiting for previously queued deployments. Current mode remains active.');
-    const queued=await dispatchSourceProductionDeployments(next,required);
-    await db().query(
-      `insert into audit_events(actor_user_id,actor,action,resource_type,resource_id,details)
-       values($1,$2,'github_profile.handover_preparing','system_settings','github_profile',$3)`,
-      [actorUserId,actor,JSON.stringify({from:expected,to:next,stage,queued,ready:destination.services,database_changed:false})],
-    );
-    throw new Error('Destination services are being prepared: '+queued.join(', ')+'. Current mode remains active. Verify readiness and move the lever again to complete handover.');
+    const absent=destination.services.filter(service=>!service.ready)
+      .map(service=>service.repo+' ('+service.reason+')');
+    throw new Error('Destination projects resumed, but production services are not operational: '+absent.join('; ')+
+      '. No deployment was queued and the current mode remains active.');
   }
+  // Current production commits are diagnostic only. Switching to an already
+  // functioning standby must not silently trigger a build or redeployment.
+  const outdated=destination.services.filter(service=>!service.current).map(service=>service.repo);
+
   const pool=db();
   const client=await pool.connect();
   try{
@@ -456,6 +455,8 @@ export async function setGithubProfile(
         acknowledged:true,github_targets:checked,
         vercel_deployment_workflows:destinations,
         verified_vercel_projects:projects,
+        destination_production_current:destination.allCurrent,
+        destination_outdated_repositories:outdated,
         verified_github_production_credentials:githubSecrets,
         synchronized_license_manager_connections:vercelLicenseCredentials,
         database_source:'lucaskerim123/Master-Database-System',
@@ -463,21 +464,30 @@ export async function setGithubProfile(
       })],
     );
     await client.query('commit');
-    // The old mode must not remain a second online Vercel family.
-    // Record a partial cutover explicitly if Vercel refuses any pause operation.
-    // Do not pause the previous License Manager before installed clients
-    // can read the switch pulse. Standby middleware blocks operations, while
-    // the old public entrypoints remain available for safe handover routing.
+    handoverCommitted=true;
+    // Authority is selected, but installed customers may still be polling the
+    // previous API. A receipt cannot authenticate deployment routing, so do
+    // not terminate the previous family as part of this transaction.
+    // The owner must complete independent routing attestation before shutdown.
     return {...updated,sourceActivation:{
-      queued:[],failed:[],
+      queued:[],failed:[],pendingPreviousShutdown:true,
       pulseRevision:Number(updated.pulse_revision)
     }};
+
   }catch(error){
     await client.query('rollback').catch(()=>{});
     throw error;
   }finally{
     client.release();
+  }  }catch(error){
+    if(handoverCommitted)throw error;
+    const restoreFailures=await restoreResumedSourceServices(next,resumed);
+    const reason=error instanceof Error?error.message:String(error);
+    throw new Error(reason+(restoreFailures.length
+      ? ' Standby restoration INCOMPLETE: '+restoreFailures.join('; ')
+      : ' Standby projects restored; previous source mode remains active.'));
   }
+
 }
 
 export async function getSourceHandoverStatus(){

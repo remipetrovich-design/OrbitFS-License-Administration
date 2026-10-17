@@ -54,8 +54,8 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
  try{
   const switched=await setGithubProfile(next,expected,acknowledged,user.id,user.email);
   if(switched.sourceActivation?.failed?.length)return {
-   status:'success',message:'Source mode changed, but service deployment dispatch failed: '+switched.sourceActivation.failed.join('; ')+
-    '. The active mode changed; production routing is NOT yet complete.'
+   status:'success',message:'Source mode changed, but pausing the previous production projects failed: '+switched.sourceActivation.failed.join('; ')+
+    '. The destination is active, but the previous projects require manual pause reconciliation.'
   };
  }catch(error){
   // A staged destination is not a failed mode change: the original mode is
@@ -66,7 +66,7 @@ async function switchGithubProfile(_previous:SourceSwitchResult,formData:FormDat
  }
  revalidatePath('/settings');revalidatePath('/');
  return {status:'success',message:'Source mode changed to '+(next==='primary'?'MAIN':'FALLBACK')+
-  '. Destination deployments passed readiness checks before cutover. A global authority-refresh pulse was issued; runtime acknowledgments and old-mode shutdown remain to be verified.'};
+  '. Destination deployments passed readiness checks and a source-change pulse was published. The previous projects remain online until external Base/Engine routing is independently verified. API activation and previous-mode shutdown remain manual.'};
 }
 
 async function prepareFallbackConnections():Promise<{status:'success'|'error';message:string}>{

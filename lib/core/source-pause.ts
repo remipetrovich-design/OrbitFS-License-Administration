@@ -13,13 +13,32 @@ async function change(profile:SourceFamily,projectId:string,action:'pause'|'unpa
   signal:AbortSignal.timeout(20000),headers:{authorization:'Bearer '+token,accept:'application/json'}});
  if(!response.ok)throw new Error('Vercel '+action+' denied for '+profile+' project '+projectId+' (HTTP '+response.status+')');
 }
-export async function resumeSourceServices(profile:SourceFamily){
+export async function resumeSourceServices(profile:SourceFamily, resumed:string[]=[]){
  const p=PROJECTS[profile];
- // License Manager must be online before its dependents.
- for(const id of [p.license,p.billing,p.panel])await change(profile,id,'unpause');
+ // Record each completed operation immediately so even a partial resume can
+ // be restored if subsequent checks or project operations fail.
+ for(const id of [p.license,p.billing,p.panel]){
+  await change(profile,id,'unpause');
+  resumed.push(id);
+ }
+ return resumed;
+}
+export async function restoreResumedSourceServices(profile:SourceFamily,resumed:readonly string[]){
+ const errors:string[]=[];
+ // Restore in reverse order; License Manager is shut down last.
+ for(const id of [...resumed].reverse()){
+  try{await change(profile,id,'pause');}
+  catch(error){errors.push(id+': '+(error instanceof Error?error.message:String(error)));}
+ }
+ return errors;
 }
 export async function pausePreviousSourceServices(profile:SourceFamily){
  const p=PROJECTS[profile];
  // The old License Manager is always the final project taken offline.
- for(const id of [p.billing,p.panel,p.license])await change(profile,id,'pause');
+ const failures:string[]=[];
+ for(const id of [p.billing,p.panel,p.license]){
+  try{await change(profile,id,'pause');}
+  catch(error){failures.push(id+': '+(error instanceof Error?error.message:String(error)));}
+ }
+ if(failures.length)throw new Error('Previous source pause incomplete: '+failures.join('; '));
 }
