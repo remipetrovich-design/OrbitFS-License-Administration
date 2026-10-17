@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {runInNewContext} from 'node:vm';
+import ts from 'typescript';
 import {readFileSync} from 'node:fs';
 const source=readFileSync('lib/core/source-activation.ts','utf8');
 const settings=readFileSync('lib/core/settings.ts','utf8');
@@ -65,4 +67,42 @@ test('owner can prepare standby Fallback while MAIN remains active, without depl
  assert.match(control,/Prepare Fallback GitHub connections/);
  assert.match(ui,/allowPreparation=\{!masterEnabled\|\|maintenance\}/);
  assert.match(control,/disabled=\{!allowPreparation\|\|preparing\}/);
+});
+
+test('deployment inspection separates READY source, current commit, and health',async()=>{
+ const begin=source.indexOf('async function latestReadyDeployment(');
+ const end=source.indexOf('export async function dispatchSourceProductionDeployments(',begin);
+ assert.ok(begin>=0&&end>begin,'readiness implementation is present');
+ const snippet=source.slice(begin,end).replace('export async function inspectSourceDeployments','async function inspectSourceDeployments');
+ const javascript=ts.transpileModule(snippet,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
+ const currentSha='a'.repeat(40);
+ const service={repo:'remipetrovich-design/OrbitFS-License-Administration',projectId:'project',healthUrl:'https://example.test/health'};
+ const identity={githubOrg:'remipetrovich-design',githubRepo:'OrbitFS-License-Administration'};
+ async function inspect(deployment,applicationHealthy=true){
+  const context={
+   WORKFLOWS:{fallback:[service]},
+   credentials:()=>({github:'test-github-token',vercel:'test-vercel-token',teamId:'team'}),
+   github:async()=>({object:{sha:currentSha}}),
+   fetch:async()=>({ok:true,json:async()=>({deployments:deployment?[deployment]:[]})}),
+   applicationReady:async()=>applicationHealthy,
+   AbortSignal:{timeout:()=>undefined},
+   encodeURIComponent
+  };
+  runInNewContext(javascript+';globalThis.inspect=inspectSourceDeployments;',context);
+  return context.inspect('fallback');
+ }
+ const latest=await inspect({readyState:'READY',meta:{...identity,githubCommitSha:currentSha}});
+ assert.equal(latest.allReady,true);
+ assert.equal(latest.allCurrent,true);
+ assert.equal(latest.services[0].current,true);
+ const earlier=await inspect({readyState:'READY',meta:{...identity,githubCommitSha:'b'.repeat(40)}});
+ assert.equal(earlier.allReady,true,'an operational prior deployment can be selected without automatic deployment');
+ assert.equal(earlier.allCurrent,false,'outdated source must be reported separately');
+ assert.match(earlier.services[0].reason,/earlier main commit/);
+ const wrongRepo=await inspect({readyState:'READY',meta:{...identity,githubRepo:'Unrelated',githubCommitSha:currentSha}});
+ assert.equal(wrongRepo.allReady,false,'never accept a deployment from a different repository');
+ assert.match(wrongRepo.services[0].reason,/repository/);
+ const unhealthy=await inspect({readyState:'READY',meta:{...identity,githubCommitSha:currentSha}},false);
+ assert.equal(unhealthy.allReady,false,'the runtime health check must still protect source handover');
+ assert.match(unhealthy.services[0].reason,/health endpoint unavailable/);
 });

@@ -164,7 +164,11 @@ async function applicationReady(service:Service):Promise<boolean>{
  }catch{return false;}
 }
 
-async function latestReadyDeployment(service:Service,token:string,teamId:string,githubToken:string){
+type ProductionStatus = {ready:boolean;current:boolean;reason:string};
+
+async function latestReadyDeployment(
+ service:Service,token:string,teamId:string,githubToken:string
+):Promise<ProductionStatus>{
  const ref=await github('/repos/'+service.repo+'/git/ref/heads/main',githubToken) as {object?:{sha?:string}};
  const expectedSha=String(ref.object?.sha||'').toLowerCase();
  if(!/^[a-f0-9]{40}$/.test(expectedSha))throw new Error('Invalid destination main commit');
@@ -177,17 +181,31 @@ async function latestReadyDeployment(service:Service,token:string,teamId:string,
  if(!response.ok)throw new Error('Vercel denied the Production health check for '+service.repo+' (HTTP '+response.status+').');
  const data=await response.json() as {deployments?:Array<{id?:string;readyState?:string;state?:string;meta?:{githubCommitSha?:string;githubOrg?:string;githubRepo?:string}}>};
  const deployed=data.deployments?.[0];
- return Boolean(deployed&&(deployed.readyState==='READY'||deployed.state==='READY')&&
-  String(deployed.meta?.githubCommitSha||'').toLowerCase()===expectedSha&&
-  String(deployed.meta?.githubOrg||'')+'/'+String(deployed.meta?.githubRepo||'')===service.repo);
+ if(!deployed)return {ready:false,current:false,reason:'No production deployment found'};
+ if(deployed.readyState!=='READY'&&deployed.state!=='READY')
+  return {ready:false,current:false,reason:'Production deployment is not READY'};
+ const deployedRepo=String(deployed.meta?.githubOrg||'')+'/'+String(deployed.meta?.githubRepo||'');
+ if(deployedRepo!==service.repo)
+  return {ready:false,current:false,reason:'Production deployment repository does not match expected source'};
+ const current=String(deployed.meta?.githubCommitSha||'').toLowerCase()===expectedSha;
+ // A validated, healthy standby may already be deployed on an earlier main SHA.
+ // Newer commits are reported separately and never deployed by source switching.
+ return {ready:true,current,
+  reason:current?'Production READY on current main':'Production READY on earlier main commit'};
 }
 export async function inspectSourceDeployments(profile:SourceFamily){
  const {github:githubToken,vercel,teamId}=credentials(profile);
- const statuses=await Promise.all(WORKFLOWS[profile].map(async service=>({
-  repo:service.repo,projectId:service.projectId,
-  ready:(await latestReadyDeployment(service,vercel,teamId,githubToken))&&(await applicationReady(service))
- })));
- return {profile,services:statuses,allReady:statuses.every(x=>x.ready)};
+ const statuses=await Promise.all(WORKFLOWS[profile].map(async service=>{
+  const deployed=await latestReadyDeployment(service,vercel,teamId,githubToken);
+  const healthy=deployed.ready&&await applicationReady(service);
+  return {
+   repo:service.repo,projectId:service.projectId,
+   ready:deployed.ready&&healthy,
+   current:deployed.current,
+   reason:!deployed.ready?deployed.reason:!healthy?'Production application health endpoint unavailable':deployed.reason
+  };
+ }));
+ return {profile,services:statuses,allReady:statuses.every(x=>x.ready),allCurrent:statuses.every(x=>x.current)};
 }
 export async function dispatchSourceProductionDeployments(profile:SourceFamily,only?:string[]){
  const {github:token}=credentials(profile);
